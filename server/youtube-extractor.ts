@@ -27,21 +27,16 @@ function parseQualityHeight(quality: string): number {
 function buildFormatSelector(quality: string, format: string): string {
   const height = parseQualityHeight(quality);
   
+  // SIMPLIFIED: Use basic selectors that are known to work reliably
   if (format === 'mp4') {
-    // For MP4, prefer H.264/AAC for compatibility
-    if (height >= 1080) {
-      // High quality: merge separate video/audio streams with codec constraints
-      return `bestvideo[height<=${height}][vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a][ext=m4a]/bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
-    } else {
-      // Lower quality: prefer progressive but allow merging
-      return `best[height<=${height}][ext=mp4]/bestvideo[height<=${height}][vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a]/best[height<=${height}]`;
-    }
+    // Simple MP4 selector with fallbacks
+    return `best[height<=${height}][ext=mp4]/bestvideo[height<=${height}]+bestaudio[ext=m4a]/best[height<=${height}]`;
   } else if (format === 'webm') {
-    // For WebM, prefer VP9/Opus
-    return `bestvideo[height<=${height}][ext=webm]+bestaudio[ext=webm]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
+    // Simple WebM selector
+    return `best[height<=${height}][ext=webm]/bestvideo[height<=${height}]+bestaudio[ext=webm]/best[height<=${height}]`;
   } else {
-    // Default fallback
-    return `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
+    // Default fallback - use most compatible selector
+    return `best[height<=${height}]`;
   }
 }
 
