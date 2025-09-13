@@ -83,30 +83,37 @@ async function getAvailableFormats(url: string, userAgent: string): Promise<Avai
 
 function selectFormatByQuality(formats: AvailableFormat[], desiredHeight: number, container: string): QualitySelection {
   console.log(`Selecting format for desired height: ${desiredHeight}, container: ${container}`);
+  console.log(`Total formats available: ${formats.length}`);
+  
+  // Debug: Show available formats
+  const heightFormats = formats.filter(f => f.height).map(f => `${f.format_id}(${f.height}p-${f.ext})`);
+  console.log(`Available heights: ${heightFormats.join(', ')}`);
   
   const requested = { 
     quality: Object.keys(QUALITY_MAP).find(k => QUALITY_MAP[k] === desiredHeight) || `${desiredHeight}p`, 
     format: container 
   };
 
-  // Filter out formats that are too high quality (never go above requested)
-  const availableFormats = formats.filter(f => 
-    f.height && f.height <= desiredHeight && f.ext && f.format_id
+  // Get all formats with valid height and format_id
+  const validFormats = formats.filter(f => 
+    f.height && f.ext && f.format_id
   );
 
-  // 1. Try to find progressive format with exact container match
-  let progressive = availableFormats.filter(f => 
+  // Find formats at exact height or best available below desired height
+  const targetFormats = validFormats.filter(f => f.height! <= desiredHeight);
+  console.log(`Target formats under ${desiredHeight}p: ${targetFormats.map(f => `${f.format_id}(${f.height}p)`).join(', ')}`);
+
+  // 1. Try exact height match first (progressive format)
+  let exactMatch = targetFormats.filter(f => 
+    f.height === desiredHeight &&
     f.vcodec && f.vcodec !== 'none' && 
     f.acodec && f.acodec !== 'none' && 
     f.ext === container
   );
   
-  if (progressive.length > 0) {
-    // Get the highest quality progressive format
-    const selected = progressive.reduce((best, current) => 
-      (current.height || 0) > (best.height || 0) ? current : best
-    );
-    console.log(`Selected progressive format: ${selected.format_id} (${selected.height}p, ${selected.ext})`);
+  if (exactMatch.length > 0) {
+    const selected = exactMatch[0]; // Use first exact match
+    console.log(`Selected exact height progressive format: ${selected.format_id} (${selected.height}p, ${selected.ext})`);
     return {
       formatSelector: selected.format_id,
       selectedHeight: selected.height || 0,
@@ -115,8 +122,29 @@ function selectFormatByQuality(formats: AvailableFormat[], desiredHeight: number
     };
   }
 
-  // 2. Try progressive with any container
-  progressive = availableFormats.filter(f => 
+  // 2. Try closest lower quality progressive format 
+  let progressive = targetFormats.filter(f => 
+    f.vcodec && f.vcodec !== 'none' && 
+    f.acodec && f.acodec !== 'none' && 
+    f.ext === container
+  );
+  
+  if (progressive.length > 0) {
+    // Get the highest quality available (closest to desired)
+    const selected = progressive.reduce((best, current) => 
+      (current.height || 0) > (best.height || 0) ? current : best
+    );
+    console.log(`Selected closest progressive format: ${selected.format_id} (${selected.height}p, ${selected.ext})`);
+    return {
+      formatSelector: selected.format_id,
+      selectedHeight: selected.height || 0,
+      selectedFormat: selected.ext,
+      requested
+    };
+  }
+
+  // 3. Try progressive with any container (if specific container not available)
+  progressive = targetFormats.filter(f => 
     f.vcodec && f.vcodec !== 'none' && 
     f.acodec && f.acodec !== 'none'
   );
@@ -134,8 +162,8 @@ function selectFormatByQuality(formats: AvailableFormat[], desiredHeight: number
     };
   }
 
-  // 3. Merge separate video and audio streams
-  const videoFormats = availableFormats.filter(f => 
+  // 4. Try merging video + audio for better quality
+  const videoFormats = targetFormats.filter(f => 
     f.vcodec && f.vcodec !== 'none' && (!f.acodec || f.acodec === 'none')
   );
   
@@ -168,9 +196,9 @@ function selectFormatByQuality(formats: AvailableFormat[], desiredHeight: number
     };
   }
 
-  // 4. Fallback to best available under desired height
-  if (availableFormats.length > 0) {
-    const selected = availableFormats.reduce((best, current) => 
+  // 5. Fallback to best available under desired height
+  if (targetFormats.length > 0) {
+    const selected = targetFormats.reduce((best: AvailableFormat, current: AvailableFormat) => 
       (current.height || 0) > (best.height || 0) ? current : best
     );
     console.log(`Fallback format selected: ${selected.format_id} (${selected.height}p, ${selected.ext})`);
