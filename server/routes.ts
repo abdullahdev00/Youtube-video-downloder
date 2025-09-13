@@ -10,7 +10,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { url } = req.body;
       
-      if (!url || !url.includes('youtube.com/watch') && !url.includes('youtu.be/')) {
+      // Support regular YouTube videos, YouTube Shorts, and youtu.be links
+      const isValidYouTubeUrl = url && (
+        url.includes('youtube.com/watch') || 
+        url.includes('youtube.com/shorts/') || 
+        url.includes('youtu.be/')
+      );
+      
+      if (!isValidYouTubeUrl) {
         return res.status(400).json({ error: "Invalid YouTube URL" });
       }
 
@@ -57,7 +64,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { url, quality, format } = result.data;
 
-      if (!url || !url.includes('youtube.com/watch') && !url.includes('youtu.be/')) {
+      // Support regular YouTube videos, YouTube Shorts, and youtu.be links
+      const isValidYouTubeUrl = url && (
+        url.includes('youtube.com/watch') || 
+        url.includes('youtube.com/shorts/') || 
+        url.includes('youtu.be/')
+      );
+      
+      if (!isValidYouTubeUrl) {
         return res.status(400).json({ error: "Invalid YouTube URL" });
       }
 
