@@ -299,6 +299,7 @@ export function HeroSection() {
               duration={videoInfo.duration}
               views={videoInfo.views}
               uploadDate={videoInfo.uploadDate}
+              url={url}
               onDownload={handleDownload}
             />
           </div>
