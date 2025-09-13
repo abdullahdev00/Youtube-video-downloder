@@ -6,6 +6,40 @@ import os
 import tempfile
 from pathlib import Path
 
+# Quality mapping utility functions
+QUALITY_MAP = {
+    '2160p': 2160,
+    '1440p': 1440, 
+    '1080p': 1080,
+    '720p': 720,
+    '480p': 480,
+    '360p': 360
+}
+
+def parse_quality_height(quality):
+    """Convert UI quality string to height number"""
+    if quality == 'best':
+        return 9999
+    return QUALITY_MAP.get(quality, 720)  # Default to 720p if unknown
+
+def build_format_selector(quality, format_type):
+    """Build proper yt-dlp format selector"""
+    height = parse_quality_height(quality)
+    
+    if format_type == 'mp4':
+        if height >= 1080:
+            # High quality: merge separate streams with codec constraints
+            return f'bestvideo[height<={height}][vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a][ext=m4a]/bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}]'
+        else:
+            # Lower quality: prefer progressive but allow merging  
+            return f'best[height<={height}][ext=mp4]/bestvideo[height<={height}][vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a]/best[height<={height}]'
+    elif format_type == 'webm':
+        # For WebM, prefer VP9/Opus
+        return f'bestvideo[height<={height}][ext=webm]+bestaudio[ext=webm]/bestvideo[height<={height}]+bestaudio/best[height<={height}]'
+    else:
+        # Default fallback
+        return f'bestvideo[height<={height}]+bestaudio/best[height<={height}]'
+
 def download_video(url, quality='best', format_type='mp4', output_dir='/tmp/downloads'):
     """
     Download YouTube video with advanced bot detection bypass
@@ -14,9 +48,12 @@ def download_video(url, quality='best', format_type='mp4', output_dir='/tmp/down
         # Create output directory
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         
+        # Build proper format selector
+        format_selector = build_format_selector(quality, format_type)
+        
         # Configure yt-dlp with bot detection bypass settings
         ydl_opts = {
-            'format': f'{quality}[ext={format_type}]/best[ext={format_type}]/best',
+            'format': format_selector,
             'outtmpl': f'{output_dir}/%(title)s.%(ext)s',
             
             # Bot detection bypass options (2025)
@@ -42,10 +79,9 @@ def download_video(url, quality='best', format_type='mp4', output_dir='/tmp/down
             'no_warnings': True,
             'logger': None,  # Disable default logger
             
-            # Additional bypass options
+            # Additional bypass options (DASH/HLS enabled for high quality)
             'extractor_args': {
                 'youtube': {
-                    'skip': ['hls', 'dash'],  # Skip potentially blocked formats
                     'player_client': ['android', 'web'],  # Use multiple clients
                 }
             }
@@ -61,11 +97,17 @@ def download_video(url, quality='best', format_type='mp4', output_dir='/tmp/down
                     'preferredquality': '192',
                 }],
             })
+        elif format_type == 'mp4':
+            # Add merge format for MP4 compatibility
+            ydl_opts['merge_output_format'] = 'mp4'
         
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # Extract info first to get filename
             info = ydl.extract_info(url, download=False)
+            if info is None:
+                raise Exception("Failed to extract video information")
+                
             title = info.get('title', 'Unknown')
             duration = info.get('duration', 0)
             
@@ -124,6 +166,8 @@ def get_video_info(url):
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            if info is None:
+                raise Exception("Failed to extract video information")
             
             # Extract available formats
             formats = info.get('formats', [])
