@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
@@ -215,6 +215,63 @@ class YouTubeExtractor {
     throw lastError || new Error('All download strategies failed');
   }
 
+  // New method for downloading with real-time progress
+  async downloadVideoWithProgress(
+    url: string, 
+    quality: string = '720p', 
+    format: string = 'mp4',
+    outputPath: string,
+    progressCallback?: (progress: any) => void,
+    timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
+  ): Promise<string> {
+    const userAgent = this.getRandomUserAgent();
+    await this.delay(Math.random() * 2000 + 1000);
+
+    const strategies = [
+      () => this.downloadWithProgressAndroidClient(url, quality, format, userAgent, outputPath, progressCallback, timeoutMs),
+      () => this.downloadWithProgressIOSClient(url, quality, format, userAgent, outputPath, progressCallback, timeoutMs),
+      () => this.downloadWithProgressWebClient(url, quality, format, userAgent, outputPath, progressCallback, timeoutMs)
+    ];
+
+    let lastError: Error | null = null;
+
+    for (const strategy of strategies) {
+      try {
+        await strategy();
+        
+        // Check for the actual output file with potential different extension
+        const basePath = outputPath.replace(/\.[^.]+$/, '');
+        const possibleExtensions = ['mp4', 'webm', 'mkv', 'avi', 'mov', 'flv'];
+        let foundFile = null;
+        
+        // First check the exact path
+        if (fs.existsSync(outputPath)) {
+          foundFile = outputPath;
+        } else {
+          // Check for files with different extensions
+          for (const ext of possibleExtensions) {
+            const testPath = `${basePath}.${ext}`;
+            if (fs.existsSync(testPath)) {
+              foundFile = testPath;
+              break;
+            }
+          }
+        }
+        
+        if (foundFile) {
+          console.log(`Download completed successfully: ${foundFile}`);
+          return foundFile; // Return the actual file path
+        }
+      } catch (error) {
+        lastError = error as Error;
+        console.error(`Download strategy with progress failed:`, (error as Error).message);
+        await this.delay(2000);
+      }
+    }
+
+    throw lastError || new Error('All download strategies with progress failed');
+  }
+
   private async downloadWithAndroidClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
     const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
     const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputPath}" "${url}"`;
@@ -234,6 +291,352 @@ class YouTubeExtractor {
     const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${qualitySelector}" -o "${outputPath}" "${url}"`;
     
     await execAsync(command, { timeout: 120000 });
+  }
+
+  // Progress-enabled download methods using spawn for real-time progress
+  private async downloadWithProgressAndroidClient(
+    url: string, 
+    quality: string, 
+    format: string, 
+    userAgent: string, 
+    outputPath: string, 
+    progressCallback?: (progress: any) => void,
+    timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
+  ): Promise<string> {
+    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
+    
+    // Use yt-dlp's %(ext)s template to handle format matching
+    const outputTemplate = outputPath.replace(/\.[^.]+$/, '.%(ext)s');
+    
+    const args = [
+      '--extractor-args', 'youtube:player_client=android',
+      '--user-agent', userAgent,
+      '-f', qualitySelector,
+      '-o', outputTemplate,
+      '--newline', // Force progress output on new lines
+      '--progress', // Show progress
+      '--no-colors', // Disable colors for easier parsing
+      url
+    ];
+
+    return new Promise((resolve, reject) => {
+      const ytdlpProcess = spawn('yt-dlp', args, {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let stderr = '';
+      let timeoutHandle: NodeJS.Timeout | null = null;
+      
+      ytdlpProcess.stderr.on('data', (data) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        
+        // Parse progress from yt-dlp output
+        this.parseProgressOutput(chunk, progressCallback);
+      });
+
+      ytdlpProcess.stdout.on('data', (data) => {
+        // Sometimes progress goes to stdout
+        const chunk = data.toString();
+        this.parseProgressOutput(chunk, progressCallback);
+      });
+
+      ytdlpProcess.on('close', (code) => {
+        // Clear timeout on completion
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        
+        if (code === 0) {
+          // Find the actual output file with potential different extension
+          const basePath = outputPath.replace(/\.[^.]+$/, '');
+          const possibleExtensions = ['mp4', 'webm', 'mkv', 'avi', 'mov', 'flv'];
+          let foundFile = null;
+          
+          // First check the exact path
+          if (fs.existsSync(outputPath)) {
+            foundFile = outputPath;
+          } else {
+            // Check for files with different extensions
+            for (const ext of possibleExtensions) {
+              const testPath = `${basePath}.${ext}`;
+              if (fs.existsSync(testPath)) {
+                foundFile = testPath;
+                break;
+              }
+            }
+          }
+          
+          if (foundFile) {
+            resolve(foundFile);
+          } else {
+            reject(new Error('Downloaded file not found after Android client completion'));
+          }
+        } else {
+          reject(new Error(`yt-dlp Android client failed with code ${code}: ${stderr}`));
+        }
+      });
+
+      ytdlpProcess.on('error', (error) => {
+        // Clear timeout on error
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        reject(new Error(`yt-dlp Android client process error: ${error.message}`));
+      });
+
+      // Set timeout with proper cleanup
+      timeoutHandle = setTimeout(() => {
+        ytdlpProcess.kill();
+        reject(new Error(`yt-dlp Android client download timeout after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+    });
+  }
+
+  private async downloadWithProgressIOSClient(
+    url: string, 
+    quality: string, 
+    format: string, 
+    userAgent: string, 
+    outputPath: string, 
+    progressCallback?: (progress: any) => void,
+    timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
+  ): Promise<string> {
+    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
+    
+    // Use yt-dlp's %(ext)s template to handle format matching
+    const outputTemplate = outputPath.replace(/\.[^.]+$/, '.%(ext)s');
+    
+    const args = [
+      '--extractor-args', 'youtube:player_client=ios',
+      '--user-agent', userAgent,
+      '-f', qualitySelector,
+      '-o', outputTemplate,
+      '--newline',
+      '--progress',
+      '--no-colors',
+      url
+    ];
+
+    return new Promise((resolve, reject) => {
+      const ytdlpProcess = spawn('yt-dlp', args, {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let stderr = '';
+      let timeoutHandle: NodeJS.Timeout | null = null;
+      
+      ytdlpProcess.stderr.on('data', (data) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        this.parseProgressOutput(chunk, progressCallback);
+      });
+
+      ytdlpProcess.stdout.on('data', (data) => {
+        const chunk = data.toString();
+        this.parseProgressOutput(chunk, progressCallback);
+      });
+
+      ytdlpProcess.on('close', (code) => {
+        // Clear timeout on completion
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        
+        if (code === 0) {
+          // Find the actual output file with potential different extension
+          const basePath = outputPath.replace(/\.[^.]+$/, '');
+          const possibleExtensions = ['mp4', 'webm', 'mkv', 'avi', 'mov', 'flv'];
+          let foundFile = null;
+          
+          // First check the exact path
+          if (fs.existsSync(outputPath)) {
+            foundFile = outputPath;
+          } else {
+            // Check for files with different extensions
+            for (const ext of possibleExtensions) {
+              const testPath = `${basePath}.${ext}`;
+              if (fs.existsSync(testPath)) {
+                foundFile = testPath;
+                break;
+              }
+            }
+          }
+          
+          if (foundFile) {
+            resolve(foundFile);
+          } else {
+            reject(new Error('Downloaded file not found after iOS client completion'));
+          }
+        } else {
+          reject(new Error(`yt-dlp iOS client failed with code ${code}: ${stderr}`));
+        }
+      });
+
+      ytdlpProcess.on('error', (error) => {
+        // Clear timeout on error
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        reject(new Error(`yt-dlp iOS client process error: ${error.message}`));
+      });
+
+      // Set timeout with proper cleanup
+      timeoutHandle = setTimeout(() => {
+        ytdlpProcess.kill();
+        reject(new Error(`yt-dlp iOS client download timeout after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+    });
+  }
+
+  private async downloadWithProgressWebClient(
+    url: string, 
+    quality: string, 
+    format: string, 
+    userAgent: string, 
+    outputPath: string, 
+    progressCallback?: (progress: any) => void,
+    timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
+  ): Promise<string> {
+    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
+    
+    // Use yt-dlp's %(ext)s template to handle format matching
+    const outputTemplate = outputPath.replace(/\.[^.]+$/, '.%(ext)s');
+    
+    const args = [
+      '--extractor-args', 'youtube:player_client=web',
+      '--user-agent', userAgent,
+      '--add-header', 'Accept-Language:en-US,en;q=0.9',
+      '-f', qualitySelector,
+      '-o', outputTemplate,
+      '--newline',
+      '--progress',
+      '--no-colors',
+      url
+    ];
+
+    return new Promise((resolve, reject) => {
+      const ytdlpProcess = spawn('yt-dlp', args, {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let stderr = '';
+      let timeoutHandle: NodeJS.Timeout | null = null;
+      
+      ytdlpProcess.stderr.on('data', (data) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        this.parseProgressOutput(chunk, progressCallback);
+      });
+
+      ytdlpProcess.stdout.on('data', (data) => {
+        const chunk = data.toString();
+        this.parseProgressOutput(chunk, progressCallback);
+      });
+
+      ytdlpProcess.on('close', (code) => {
+        // Clear timeout on completion
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        
+        if (code === 0) {
+          // Find the actual output file with potential different extension
+          const basePath = outputPath.replace(/\.[^.]+$/, '');
+          const possibleExtensions = ['mp4', 'webm', 'mkv', 'avi', 'mov', 'flv'];
+          let foundFile = null;
+          
+          // First check the exact path
+          if (fs.existsSync(outputPath)) {
+            foundFile = outputPath;
+          } else {
+            // Check for files with different extensions
+            for (const ext of possibleExtensions) {
+              const testPath = `${basePath}.${ext}`;
+              if (fs.existsSync(testPath)) {
+                foundFile = testPath;
+                break;
+              }
+            }
+          }
+          
+          if (foundFile) {
+            resolve(foundFile);
+          } else {
+            reject(new Error('Downloaded file not found after Web client completion'));
+          }
+        } else {
+          reject(new Error(`yt-dlp Web client failed with code ${code}: ${stderr}`));
+        }
+      });
+
+      ytdlpProcess.on('error', (error) => {
+        // Clear timeout on error
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        reject(new Error(`yt-dlp Web client process error: ${error.message}`));
+      });
+
+      // Set timeout with proper cleanup
+      timeoutHandle = setTimeout(() => {
+        ytdlpProcess.kill();
+        reject(new Error(`yt-dlp Web client download timeout after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+    });
+  }
+
+  // Parse yt-dlp progress output and extract meaningful data
+  private parseProgressOutput(chunk: string, progressCallback?: (progress: any) => void): void {
+    if (!progressCallback) return;
+
+    const lines = chunk.split('\n');
+    
+    for (const line of lines) {
+      // yt-dlp progress format: [download] 45.2% of 123.45MB at 1.23MB/s ETA 00:45
+      const progressMatch = line.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+([\d\.]+\w+)(?:\s+at\s+([\d\.]+\w+\/s))?(?:\s+ETA\s+(\d+:\d+))?/);
+      
+      if (progressMatch) {
+        const [, percent, totalSize, speed, eta] = progressMatch;
+        
+        const progress = {
+          progress: parseFloat(percent),
+          fileSize: totalSize,
+          speed: speed || 'calculating...',
+          eta: eta || 'calculating...',
+          downloadedSize: this.calculateDownloadedSize(parseFloat(percent), totalSize)
+        };
+        
+        progressCallback(progress);
+      }
+      
+      // Also check for file size info
+      const sizeMatch = line.match(/\[download\] Destination:\s+(.+)/);
+      if (sizeMatch) {
+        // File destination found - could be useful info
+        console.log(`Download destination: ${sizeMatch[1]}`);
+      }
+    }
+  }
+
+  private calculateDownloadedSize(percent: number, totalSize: string): string {
+    try {
+      const match = totalSize.match(/([\d\.]+)(\w+)/);
+      if (match) {
+        const [, size, unit] = match;
+        const downloadedAmount = (parseFloat(size) * percent / 100).toFixed(2);
+        return `${downloadedAmount}${unit}`;
+      }
+    } catch (error) {
+      console.error('Error calculating downloaded size:', error);
+    }
+    return 'calculating...';
   }
 }
 

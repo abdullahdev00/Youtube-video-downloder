@@ -188,68 +188,41 @@ async function processDownloadInBackground(
       eta: 'calculating...'
     });
 
-    // Use the singleton YouTube extractor instance
-    
-    // For demo purposes, simulate realistic progress while actual download happens
-    const progressInterval = setInterval(() => {
-      const session = downloadManager.getSession(sessionId);
-      if (session && session.status === 'downloading' && session.progress < 95) {
-        // Simulate realistic download progress
-        const increment = Math.random() * 8 + 2; // 2-10% increments
-        const newProgress = Math.min(session.progress + increment, 95);
-        
-        // Generate realistic metadata
-        const speeds = ['1.2 MB/s', '2.4 MB/s', '890 KB/s', '3.1 MB/s', '1.8 MB/s'];
-        const randomSpeed = speeds[Math.floor(Math.random() * speeds.length)];
-        
-        const remainingTime = Math.max(0, Math.ceil((100 - newProgress) * 2)); // rough ETA in seconds
-        const eta = remainingTime > 60 ? `${Math.ceil(remainingTime / 60)}m ${remainingTime % 60}s` : `${remainingTime}s`;
-        
-        downloadManager.updateProgress(sessionId, {
-          progress: newProgress,
-          speed: randomSpeed,
-          eta: eta,
-          downloadedSize: `${Math.round(newProgress * 12.5)}MB`, // Simulate ~1.2GB video
-          fileSize: quality.includes('1080') ? '1.25GB' : quality.includes('720') ? '800MB' : '400MB'
-        });
-      }
-    }, 1500);
-
     try {
-      // Start actual download
-      const buffer = await YouTubeExtractor.downloadVideo(url, quality, format);
-      
-      // Clear progress interval
-      clearInterval(progressInterval);
-      
-      // Save buffer to file instead of storing in memory
+      // Create progress callback to emit real-time updates from yt-dlp
+      const progressCallback = (progress: any) => {
+        console.log(`Real progress for session ${sessionId}:`, progress);
+        downloadManager.updateProgress(sessionId, {
+          status: 'downloading',
+          progress: progress.progress,
+          speed: progress.speed,
+          eta: progress.eta,
+          downloadedSize: progress.downloadedSize,
+          fileSize: progress.fileSize
+        });
+      };
+
+      // Generate output file path
       const filename = `video_${videoId}_${quality}_${Date.now()}.${format}`;
       const filePath = path.join(TEMP_DIR, filename);
       
-      try {
-        fs.writeFileSync(filePath, buffer);
-        console.log(`Download saved to file: ${filePath}`);
-        
-        // Mark as completed with file path
-        downloadManager.updateProgress(sessionId, {
-          status: 'completed',
-          progress: 100,
-          speed: '0 KB/s',
-          eta: 'completed',
-          downloadedSize: downloadManager.getSession(sessionId)?.fileSize || 'Unknown',
-          filePath: filePath
-        });
-        
-        console.log(`Download completed for session: ${sessionId}`);
-        
-      } catch (fileError) {
-        console.error(`Failed to save file for session ${sessionId}:`, fileError);
-        throw new Error(`Failed to save downloaded file: ${fileError}`);
-      }
+      // Start download with real-time progress tracking and capture actual file path
+      const actualFilePath = await YouTubeExtractor.downloadVideoWithProgress(url, quality, format, filePath, progressCallback);
+      
+      // Mark as completed with the actual file path returned by yt-dlp
+      downloadManager.updateProgress(sessionId, {
+        status: 'completed',
+        progress: 100,
+        speed: '0 KB/s',
+        eta: 'completed',
+        downloadedSize: downloadManager.getSession(sessionId)?.fileSize || 'Unknown',
+        filePath: actualFilePath
+      });
+      
+      console.log(`Real progress download completed for session: ${sessionId}, file: ${actualFilePath}`);
       
     } catch (downloadError) {
-      clearInterval(progressInterval);
-      console.error('Background download failed:', downloadError);
+      console.error('Real progress download failed:', downloadError);
       
       downloadManager.updateProgress(sessionId, {
         status: 'error',
