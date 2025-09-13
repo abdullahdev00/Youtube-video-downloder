@@ -334,8 +334,8 @@ class YouTubeExtractor {
   private async downloadWithAndroidClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
     const qualitySelector = buildFormatSelector(quality, format);
     const outputTemplate = buildOutputTemplate(outputPath);
-    const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
-    const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
+    // Don't force MP4 merge to avoid codec/container mismatches
+    const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
@@ -343,8 +343,8 @@ class YouTubeExtractor {
   private async downloadWithIOSClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
     const qualitySelector = buildFormatSelector(quality, format);
     const outputTemplate = buildOutputTemplate(outputPath);
-    const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
-    const command = `yt-dlp --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
+    // Don't force MP4 merge to avoid codec/container mismatches
+    const command = `yt-dlp --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
@@ -352,8 +352,8 @@ class YouTubeExtractor {
   private async downloadWithWebClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
     const qualitySelector = buildFormatSelector(quality, format);
     const outputTemplate = buildOutputTemplate(outputPath);
-    const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
-    const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
+    // Don't force MP4 merge to avoid codec/container mismatches
+    const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${qualitySelector}" -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
@@ -382,10 +382,8 @@ class YouTubeExtractor {
       url
     ];
     
-    // Add merge format for MP4 compatibility
-    if (format === 'mp4') {
-      args.splice(-1, 0, '--merge-output-format', 'mp4');
-    }
+    // REMOVED: Don't force MP4 merge as it causes codec/container mismatches
+    // Let yt-dlp choose compatible container naturally
 
     return new Promise((resolve, reject) => {
       const ytdlpProcess = spawn('yt-dlp', args, {
@@ -486,10 +484,8 @@ class YouTubeExtractor {
       url
     ];
     
-    // Add merge format for MP4 compatibility
-    if (format === 'mp4') {
-      args.splice(-1, 0, '--merge-output-format', 'mp4');
-    }
+    // REMOVED: Don't force MP4 merge as it causes codec/container mismatches
+    // Let yt-dlp choose compatible container naturally
 
     return new Promise((resolve, reject) => {
       const ytdlpProcess = spawn('yt-dlp', args, {
@@ -588,10 +584,8 @@ class YouTubeExtractor {
       url
     ];
     
-    // Add merge format for MP4 compatibility
-    if (format === 'mp4') {
-      args.splice(-1, 0, '--merge-output-format', 'mp4');
-    }
+    // REMOVED: Don't force MP4 merge as it causes codec/container mismatches
+    // Let yt-dlp choose compatible container naturally
 
     return new Promise((resolve, reject) => {
       const ytdlpProcess = spawn('yt-dlp', args, {

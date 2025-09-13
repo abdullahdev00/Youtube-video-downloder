@@ -97,11 +97,8 @@ def download_video(url, quality='best', format_type='mp4', output_dir='/tmp/down
                     'preferredquality': '192',
                 }],
             })
-        elif format_type == 'mp4':
-            # Add merge format for MP4 compatibility
-            ydl_opts['merge_output_format'] = 'mp4'
-            # Add ffmpeg options for better HTML5 playback
-            ydl_opts['postprocessor_args'] = ['-movflags', '+faststart']
+        # REMOVED: Don't force MP4 merge to avoid codec/container mismatches
+        # Let yt-dlp choose compatible container naturally
         
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
