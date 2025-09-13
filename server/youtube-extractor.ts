@@ -5,6 +5,51 @@ import path from 'path';
 
 const execAsync = promisify(exec);
 
+// Quality mapping utility functions
+interface QualityMapping {
+  [key: string]: number;
+}
+
+const QUALITY_MAP: QualityMapping = {
+  '2160p': 2160,
+  '1440p': 1440,
+  '1080p': 1080,
+  '720p': 720,
+  '480p': 480,
+  '360p': 360
+};
+
+function parseQualityHeight(quality: string): number {
+  if (quality === 'best') return 9999;
+  return QUALITY_MAP[quality] || 720; // Default to 720p if unknown
+}
+
+function buildFormatSelector(quality: string, format: string): string {
+  const height = parseQualityHeight(quality);
+  
+  if (format === 'mp4') {
+    // For MP4, prefer H.264/AAC for compatibility
+    if (height >= 1080) {
+      // High quality: merge separate video/audio streams with codec constraints
+      return `bestvideo[height<=${height}][vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a][ext=m4a]/bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
+    } else {
+      // Lower quality: prefer progressive but allow merging
+      return `best[height<=${height}][ext=mp4]/bestvideo[height<=${height}][vcodec^=avc1][ext=mp4]+bestaudio[acodec^=mp4a]/best[height<=${height}]`;
+    }
+  } else if (format === 'webm') {
+    // For WebM, prefer VP9/Opus
+    return `bestvideo[height<=${height}][ext=webm]+bestaudio[ext=webm]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
+  } else {
+    // Default fallback
+    return `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
+  }
+}
+
+function buildOutputTemplate(outputPath: string): string {
+  // Replace extension with yt-dlp template to get actual format
+  return outputPath.replace(/\.[^.]+$/, '.%(ext)s');
+}
+
 interface VideoInfo {
   title: string;
   thumbnail: string;
@@ -273,22 +318,28 @@ class YouTubeExtractor {
   }
 
   private async downloadWithAndroidClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
-    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
-    const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputPath}" "${url}"`;
+    const qualitySelector = buildFormatSelector(quality, format);
+    const outputTemplate = buildOutputTemplate(outputPath);
+    const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
+    const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 120000 });
   }
 
   private async downloadWithIOSClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
-    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
-    const command = `yt-dlp --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputPath}" "${url}"`;
+    const qualitySelector = buildFormatSelector(quality, format);
+    const outputTemplate = buildOutputTemplate(outputPath);
+    const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
+    const command = `yt-dlp --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 120000 });
   }
 
   private async downloadWithWebClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
-    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
-    const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${qualitySelector}" -o "${outputPath}" "${url}"`;
+    const qualitySelector = buildFormatSelector(quality, format);
+    const outputTemplate = buildOutputTemplate(outputPath);
+    const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
+    const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 120000 });
   }
@@ -303,10 +354,8 @@ class YouTubeExtractor {
     progressCallback?: (progress: any) => void,
     timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
   ): Promise<string> {
-    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
-    
-    // Use yt-dlp's %(ext)s template to handle format matching
-    const outputTemplate = outputPath.replace(/\.[^.]+$/, '.%(ext)s');
+    const qualitySelector = buildFormatSelector(quality, format);
+    const outputTemplate = buildOutputTemplate(outputPath);
     
     const args = [
       '--extractor-args', 'youtube:player_client=android',
@@ -318,6 +367,11 @@ class YouTubeExtractor {
       '--no-colors', // Disable colors for easier parsing
       url
     ];
+    
+    // Add merge format for MP4 compatibility
+    if (format === 'mp4') {
+      args.splice(-1, 0, '--merge-output-format', 'mp4');
+    }
 
     return new Promise((resolve, reject) => {
       const ytdlpProcess = spawn('yt-dlp', args, {
@@ -404,10 +458,8 @@ class YouTubeExtractor {
     progressCallback?: (progress: any) => void,
     timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
   ): Promise<string> {
-    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
-    
-    // Use yt-dlp's %(ext)s template to handle format matching
-    const outputTemplate = outputPath.replace(/\.[^.]+$/, '.%(ext)s');
+    const qualitySelector = buildFormatSelector(quality, format);
+    const outputTemplate = buildOutputTemplate(outputPath);
     
     const args = [
       '--extractor-args', 'youtube:player_client=ios',
@@ -419,6 +471,11 @@ class YouTubeExtractor {
       '--no-colors',
       url
     ];
+    
+    // Add merge format for MP4 compatibility
+    if (format === 'mp4') {
+      args.splice(-1, 0, '--merge-output-format', 'mp4');
+    }
 
     return new Promise((resolve, reject) => {
       const ytdlpProcess = spawn('yt-dlp', args, {
@@ -502,10 +559,8 @@ class YouTubeExtractor {
     progressCallback?: (progress: any) => void,
     timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
   ): Promise<string> {
-    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
-    
-    // Use yt-dlp's %(ext)s template to handle format matching
-    const outputTemplate = outputPath.replace(/\.[^.]+$/, '.%(ext)s');
+    const qualitySelector = buildFormatSelector(quality, format);
+    const outputTemplate = buildOutputTemplate(outputPath);
     
     const args = [
       '--extractor-args', 'youtube:player_client=web',
@@ -518,6 +573,11 @@ class YouTubeExtractor {
       '--no-colors',
       url
     ];
+    
+    // Add merge format for MP4 compatibility
+    if (format === 'mp4') {
+      args.splice(-1, 0, '--merge-output-format', 'mp4');
+    }
 
     return new Promise((resolve, reject) => {
       const ytdlpProcess = spawn('yt-dlp', args, {
