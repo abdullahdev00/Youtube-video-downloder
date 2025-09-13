@@ -245,9 +245,28 @@ class YouTubeExtractor {
       try {
         await strategy();
         
+        // Check for actual output file with potential different extension
+        const basePath = outputPath.replace(/\.[^.]+$/, '');
+        const possibleExtensions = ['mp4', 'webm', 'mkv', 'avi', 'mov', 'flv'];
+        let foundFile = null;
+        
+        // First check the exact path
         if (fs.existsSync(outputPath)) {
-          const buffer = fs.readFileSync(outputPath);
-          fs.unlinkSync(outputPath); // Cleanup
+          foundFile = outputPath;
+        } else {
+          // Check for files with different extensions
+          for (const ext of possibleExtensions) {
+            const testPath = `${basePath}.${ext}`;
+            if (fs.existsSync(testPath)) {
+              foundFile = testPath;
+              break;
+            }
+          }
+        }
+        
+        if (foundFile) {
+          const buffer = fs.readFileSync(foundFile);
+          fs.unlinkSync(foundFile); // Cleanup
           return buffer;
         }
       } catch (error) {
@@ -323,7 +342,7 @@ class YouTubeExtractor {
     const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
     const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
     
-    await execAsync(command, { timeout: 120000 });
+    await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
 
   private async downloadWithIOSClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
@@ -332,7 +351,7 @@ class YouTubeExtractor {
     const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
     const command = `yt-dlp --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
     
-    await execAsync(command, { timeout: 120000 });
+    await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
 
   private async downloadWithWebClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
@@ -341,7 +360,7 @@ class YouTubeExtractor {
     const mergeFormat = format === 'mp4' ? '--merge-output-format mp4' : '';
     const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${qualitySelector}" ${mergeFormat} -o "${outputTemplate}" "${url}"`;
     
-    await execAsync(command, { timeout: 120000 });
+    await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
 
   // Progress-enabled download methods using spawn for real-time progress
