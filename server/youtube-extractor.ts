@@ -45,6 +45,153 @@ function buildOutputTemplate(outputPath: string): string {
   return outputPath.replace(/\.[^.]+$/, '.%(ext)s');
 }
 
+// NEW: Precise quality selection interfaces and functions
+interface AvailableFormat {
+  format_id: string;
+  height?: number;
+  width?: number;
+  ext: string;
+  vcodec?: string;
+  acodec?: string;
+  filesize?: number;
+  protocol?: string;
+}
+
+interface QualitySelection {
+  formatSelector: string;
+  selectedHeight: number;
+  selectedFormat: string;
+  requested: { quality: string; format: string };
+}
+
+async function getAvailableFormats(url: string, userAgent: string): Promise<AvailableFormat[]> {
+  const command = `yt-dlp --dump-json --no-warnings --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" "${url}"`;
+  
+  try {
+    const { stdout } = await execAsync(command, { 
+      timeout: 30000,
+      env: { ...process.env, PYTHONPATH: '/opt/virtualenvs/python3/lib/python3.10/site-packages' }
+    });
+    
+    const data = JSON.parse(stdout);
+    return data.formats || [];
+  } catch (error) {
+    console.error('Failed to get available formats:', error);
+    return [];
+  }
+}
+
+function selectFormatByQuality(formats: AvailableFormat[], desiredHeight: number, container: string): QualitySelection {
+  console.log(`Selecting format for desired height: ${desiredHeight}, container: ${container}`);
+  
+  const requested = { 
+    quality: Object.keys(QUALITY_MAP).find(k => QUALITY_MAP[k] === desiredHeight) || `${desiredHeight}p`, 
+    format: container 
+  };
+
+  // Filter out formats that are too high quality (never go above requested)
+  const availableFormats = formats.filter(f => 
+    f.height && f.height <= desiredHeight && f.ext && f.format_id
+  );
+
+  // 1. Try to find progressive format with exact container match
+  let progressive = availableFormats.filter(f => 
+    f.vcodec && f.vcodec !== 'none' && 
+    f.acodec && f.acodec !== 'none' && 
+    f.ext === container
+  );
+  
+  if (progressive.length > 0) {
+    // Get the highest quality progressive format
+    const selected = progressive.reduce((best, current) => 
+      (current.height || 0) > (best.height || 0) ? current : best
+    );
+    console.log(`Selected progressive format: ${selected.format_id} (${selected.height}p, ${selected.ext})`);
+    return {
+      formatSelector: selected.format_id,
+      selectedHeight: selected.height || 0,
+      selectedFormat: selected.ext,
+      requested
+    };
+  }
+
+  // 2. Try progressive with any container
+  progressive = availableFormats.filter(f => 
+    f.vcodec && f.vcodec !== 'none' && 
+    f.acodec && f.acodec !== 'none'
+  );
+  
+  if (progressive.length > 0) {
+    const selected = progressive.reduce((best, current) => 
+      (current.height || 0) > (best.height || 0) ? current : best
+    );
+    console.log(`Selected progressive format (any container): ${selected.format_id} (${selected.height}p, ${selected.ext})`);
+    return {
+      formatSelector: selected.format_id,
+      selectedHeight: selected.height || 0,
+      selectedFormat: selected.ext,
+      requested
+    };
+  }
+
+  // 3. Merge separate video and audio streams
+  const videoFormats = availableFormats.filter(f => 
+    f.vcodec && f.vcodec !== 'none' && (!f.acodec || f.acodec === 'none')
+  );
+  
+  const audioFormats = formats.filter(f => 
+    f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none')
+  );
+
+  if (videoFormats.length > 0 && audioFormats.length > 0) {
+    // Pick best video under desired height
+    const selectedVideo = videoFormats.reduce((best, current) => 
+      (current.height || 0) > (best.height || 0) ? current : best
+    );
+    
+    // Pick compatible audio format
+    let selectedAudio;
+    if (container === 'mp4') {
+      selectedAudio = audioFormats.find(f => f.acodec?.includes('mp4a') || f.ext === 'm4a') || audioFormats[0];
+    } else {
+      selectedAudio = audioFormats.find(f => f.ext === 'webm' || f.acodec?.includes('opus')) || audioFormats[0];
+    }
+    
+    const formatSelector = `${selectedVideo.format_id}+${selectedAudio.format_id}`;
+    console.log(`Selected merged format: ${formatSelector} (${selectedVideo.height}p video + ${selectedAudio.ext} audio)`);
+    
+    return {
+      formatSelector,
+      selectedHeight: selectedVideo.height || 0,
+      selectedFormat: selectedVideo.ext,
+      requested
+    };
+  }
+
+  // 4. Fallback to best available under desired height
+  if (availableFormats.length > 0) {
+    const selected = availableFormats.reduce((best, current) => 
+      (current.height || 0) > (best.height || 0) ? current : best
+    );
+    console.log(`Fallback format selected: ${selected.format_id} (${selected.height}p, ${selected.ext})`);
+    return {
+      formatSelector: selected.format_id,
+      selectedHeight: selected.height || 0,
+      selectedFormat: selected.ext,
+      requested
+    };
+  }
+
+  // 5. Ultimate fallback - use old selector
+  console.warn(`No suitable formats found, using fallback selector`);
+  return {
+    formatSelector: `best[height<=${desiredHeight}]`,
+    selectedHeight: desiredHeight,
+    selectedFormat: container,
+    requested
+  };
+}
+
 interface VideoInfo {
   title: string;
   thumbnail: string;
@@ -332,28 +479,43 @@ class YouTubeExtractor {
   }
 
   private async downloadWithAndroidClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
-    const qualitySelector = buildFormatSelector(quality, format);
+    // Use precise quality selection
+    const desiredHeight = parseQualityHeight(quality);
+    const availableFormats = await getAvailableFormats(url, userAgent);
+    const selection = selectFormatByQuality(availableFormats, desiredHeight, format);
+    
+    console.log(`Quality selection - Requested: ${selection.requested.quality} (${selection.requested.format}), Selected: ${selection.selectedHeight}p (${selection.selectedFormat})`);
+    
     const outputTemplate = buildOutputTemplate(outputPath);
-    // Don't force MP4 merge to avoid codec/container mismatches
-    const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputTemplate}" "${url}"`;
+    const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${selection.formatSelector}" -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
 
   private async downloadWithIOSClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
-    const qualitySelector = buildFormatSelector(quality, format);
+    // Use precise quality selection
+    const desiredHeight = parseQualityHeight(quality);
+    const availableFormats = await getAvailableFormats(url, userAgent);
+    const selection = selectFormatByQuality(availableFormats, desiredHeight, format);
+    
+    console.log(`Quality selection - Requested: ${selection.requested.quality} (${selection.requested.format}), Selected: ${selection.selectedHeight}p (${selection.selectedFormat})`);
+    
     const outputTemplate = buildOutputTemplate(outputPath);
-    // Don't force MP4 merge to avoid codec/container mismatches
-    const command = `yt-dlp --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputTemplate}" "${url}"`;
+    const command = `yt-dlp --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" -f "${selection.formatSelector}" -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
 
   private async downloadWithWebClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
-    const qualitySelector = buildFormatSelector(quality, format);
+    // Use precise quality selection
+    const desiredHeight = parseQualityHeight(quality);
+    const availableFormats = await getAvailableFormats(url, userAgent);
+    const selection = selectFormatByQuality(availableFormats, desiredHeight, format);
+    
+    console.log(`Quality selection - Requested: ${selection.requested.quality} (${selection.requested.format}), Selected: ${selection.selectedHeight}p (${selection.selectedFormat})`);
+    
     const outputTemplate = buildOutputTemplate(outputPath);
-    // Don't force MP4 merge to avoid codec/container mismatches
-    const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${qualitySelector}" -o "${outputTemplate}" "${url}"`;
+    const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${selection.formatSelector}" -o "${outputTemplate}" "${url}"`;
     
     await execAsync(command, { timeout: 600000 }); // 10 minutes for high quality downloads
   }
@@ -368,13 +530,19 @@ class YouTubeExtractor {
     progressCallback?: (progress: any) => void,
     timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
   ): Promise<string> {
-    const qualitySelector = buildFormatSelector(quality, format);
+    // Use precise quality selection
+    const desiredHeight = parseQualityHeight(quality);
+    const availableFormats = await getAvailableFormats(url, userAgent);
+    const selection = selectFormatByQuality(availableFormats, desiredHeight, format);
+    
+    console.log(`Progress Quality selection - Requested: ${selection.requested.quality} (${selection.requested.format}), Selected: ${selection.selectedHeight}p (${selection.selectedFormat})`);
+    
     const outputTemplate = buildOutputTemplate(outputPath);
     
     const args = [
       '--extractor-args', 'youtube:player_client=android',
       '--user-agent', userAgent,
-      '-f', qualitySelector,
+      '-f', selection.formatSelector,
       '-o', outputTemplate,
       '--newline', // Force progress output on new lines
       '--progress', // Show progress
@@ -470,13 +638,19 @@ class YouTubeExtractor {
     progressCallback?: (progress: any) => void,
     timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
   ): Promise<string> {
-    const qualitySelector = buildFormatSelector(quality, format);
+    // Use precise quality selection
+    const desiredHeight = parseQualityHeight(quality);
+    const availableFormats = await getAvailableFormats(url, userAgent);
+    const selection = selectFormatByQuality(availableFormats, desiredHeight, format);
+    
+    console.log(`Progress iOS Quality selection - Requested: ${selection.requested.quality} (${selection.requested.format}), Selected: ${selection.selectedHeight}p (${selection.selectedFormat})`);
+    
     const outputTemplate = buildOutputTemplate(outputPath);
     
     const args = [
       '--extractor-args', 'youtube:player_client=ios',
       '--user-agent', userAgent,
-      '-f', qualitySelector,
+      '-f', selection.formatSelector,
       '-o', outputTemplate,
       '--newline',
       '--progress',
@@ -569,14 +743,20 @@ class YouTubeExtractor {
     progressCallback?: (progress: any) => void,
     timeoutMs: number = 30 * 60 * 1000 // 30 minutes default
   ): Promise<string> {
-    const qualitySelector = buildFormatSelector(quality, format);
+    // Use precise quality selection
+    const desiredHeight = parseQualityHeight(quality);
+    const availableFormats = await getAvailableFormats(url, userAgent);
+    const selection = selectFormatByQuality(availableFormats, desiredHeight, format);
+    
+    console.log(`Progress Web Quality selection - Requested: ${selection.requested.quality} (${selection.requested.format}), Selected: ${selection.selectedHeight}p (${selection.selectedFormat})`);
+    
     const outputTemplate = buildOutputTemplate(outputPath);
     
     const args = [
       '--extractor-args', 'youtube:player_client=web',
       '--user-agent', userAgent,
       '--add-header', 'Accept-Language:en-US,en;q=0.9',
-      '-f', qualitySelector,
+      '-f', selection.formatSelector,
       '-o', outputTemplate,
       '--newline',
       '--progress',
