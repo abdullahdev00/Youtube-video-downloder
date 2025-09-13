@@ -4,12 +4,9 @@ import { storage } from "./storage";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { downloadRequestSchema, videoInfoSchema } from "@shared/schema";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
-
-const execAsync = promisify(exec);
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Extract video ID from various YouTube URL formats
@@ -41,13 +38,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('Getting video info using yt-dlp with bot detection bypass...');
       const scriptPath = path.join(__dirname, 'youtube_downloader.py');
-      const { stdout, stderr } = await execAsync(`python3 "${scriptPath}" info "${url}"`);
       
-      if (stderr && !stderr.includes('WARNING')) {
-        console.error('yt-dlp stderr:', stderr);
-      }
-      
-      const result = JSON.parse(stdout);
+      const result = await new Promise<any>((resolve, reject) => {
+        const process = spawn('python3', [scriptPath, 'info', url], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 30000
+        });
+        
+        let stdout = '';
+        let stderr = '';
+        
+        process.stdout.on('data', (data) => {
+          stdout += data.toString();
+        });
+        
+        process.stderr.on('data', (data) => {
+          stderr += data.toString();
+        });
+        
+        process.on('close', (code) => {
+          try {
+            if (code !== 0) {
+              reject(new Error(`Process exited with code ${code}: ${stderr}`));
+              return;
+            }
+            const result = JSON.parse(stdout);
+            resolve(result);
+          } catch (error) {
+            reject(new Error(`Failed to parse result: ${error} - stdout: ${stdout}`));
+          }
+        });
+        
+        process.on('error', (error) => {
+          reject(error);
+        });
+      });
       
       if (result.success) {
         console.log('Successfully got video info via yt-dlp');
@@ -189,15 +214,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`Real download requested: ${format} in ${quality} quality`);
       
       try {
-        // Real download using yt-dlp with bot detection bypass
-        const scriptPath = path.join(__dirname, 'youtube_downloader.py');
-        const { stdout, stderr } = await execAsync(`python3 "${scriptPath}" download "${url}" "${quality}" "${format}"`);
+        // Validate and sanitize inputs to prevent injection
+        const validQualities = ['best', '720p', '480p', '360p', '240p', '144p'];
+        const validFormats = ['mp4', 'webm', 'mp3', 'm4a'];
         
-        if (stderr && !stderr.includes('WARNING')) {
-          console.error('Download stderr:', stderr);
+        if (!validQualities.includes(quality)) {
+          throw new Error('Invalid quality parameter');
         }
         
-        const result = JSON.parse(stdout);
+        if (!validFormats.includes(format)) {
+          throw new Error('Invalid format parameter');
+        }
+        
+        // Real download using yt-dlp with bot detection bypass (secure)
+        const scriptPath = path.join(__dirname, 'youtube_downloader.py');
+        
+        const result = await new Promise<any>((resolve, reject) => {
+          const process = spawn('python3', [scriptPath, 'download', url, quality, format], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            timeout: 120000 // 2 minutes for download
+          });
+          
+          let stdout = '';
+          let stderr = '';
+          
+          process.stdout.on('data', (data) => {
+            stdout += data.toString();
+          });
+          
+          process.stderr.on('data', (data) => {
+            stderr += data.toString();
+          });
+          
+          process.on('close', (code) => {
+            try {
+              if (code !== 0) {
+                reject(new Error(`Process exited with code ${code}: ${stderr}`));
+                return;
+              }
+              const result = JSON.parse(stdout);
+              resolve(result);
+            } catch (error) {
+              reject(new Error(`Failed to parse result: ${error} - stdout: ${stdout}`));
+            }
+          });
+          
+          process.on('error', (error) => {
+            reject(error);
+          });
+        });
         
         if (result.success) {
           // Real file download successful

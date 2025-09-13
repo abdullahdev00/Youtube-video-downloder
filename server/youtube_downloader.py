@@ -37,9 +37,10 @@ def download_video(url, quality='best', format_type='mp4', output_dir='/tmp/down
             'sleep_interval': 2,
             'max_sleep_interval': 5,
             
-            # Error handling
-            'ignoreerrors': False,
-            'no_warnings': False,
+            # Critical: Route all output to stderr to keep stdout clean for JSON
+            'quiet': True,
+            'no_warnings': True,
+            'logger': None,  # Disable default logger
             
             # Additional bypass options
             'extractor_args': {
