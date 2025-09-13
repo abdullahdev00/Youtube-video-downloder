@@ -1,7 +1,7 @@
 import { Header } from "@/components/Header";
 import { HeroSection } from "@/components/HeroSection";
 import { FeaturesSection } from "@/components/FeaturesSection";
-import { PremiumSection } from "@/components/PremiumSection";
+import { FAQSection } from "@/components/FAQSection";
 import { Footer } from "@/components/Footer";
 
 export default function Home() {
@@ -11,7 +11,7 @@ export default function Home() {
       <main>
         <HeroSection />
         <FeaturesSection />
-        <PremiumSection />
+        <FAQSection />
       </main>
       <Footer />
     </div>

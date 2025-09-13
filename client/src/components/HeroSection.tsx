@@ -304,25 +304,6 @@ export function HeroSection() {
           </div>
         )}
 
-        {/* Trust Indicators */}
-        <div className="flex flex-wrap justify-center items-center gap-8 text-sm text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 bg-chart-2 rounded-full" />
-            <span data-testid="text-downloads-count">50M+ Downloads</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 bg-chart-2 rounded-full" />
-            <span data-testid="text-formats-supported">All Formats Supported</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 bg-chart-2 rounded-full" />
-            <span data-testid="text-no-registration">No Registration Required</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 bg-chart-2 rounded-full" />
-            <span data-testid="text-secure-fast">100% Secure & Fast</span>
-          </div>
-        </div>
       </div>
     </section>
   );
