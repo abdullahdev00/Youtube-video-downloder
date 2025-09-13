@@ -1,11 +1,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { video_info, stream } from "play-dl";
+import youtubedl from "youtube-dl-exec";
 import { downloadRequestSchema, videoInfoSchema } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // YouTube video info endpoint using play-dl
+  // YouTube video info endpoint using youtube-dl-exec
   app.post("/api/video-info", async (req, res) => {
     try {
       const { url } = req.body;
@@ -21,27 +21,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Invalid YouTube URL" });
       }
 
-      const info = await video_info(url);
+      // Fetch video info using yt-dlp
+      const info = await youtubedl(url, {
+        dumpSingleJson: true,
+        noCheckCertificates: true,
+        noWarnings: true,
+        preferFreeFormats: true,
+        addHeader: [
+          'referer:youtube.com',
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        ]
+      });
       
-      if (!info) {
+      if (!info || typeof info === 'string' || !info.title) {
         return res.status(400).json({ error: "Video not found or unavailable" });
       }
 
       // Format duration from seconds to mm:ss
       const formatDuration = (seconds: number) => {
+        if (!seconds) return '00:00';
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
       };
 
       const videoInfo = {
-        title: info.video_details.title,
-        thumbnail: info.video_details.thumbnails?.[0]?.url || '',
-        duration: formatDuration(info.video_details.durationInSec),
-        views: info.video_details.views?.toLocaleString() || '0',
-        channel: info.video_details.channel?.name || 'Unknown',
-        uploadDate: info.video_details.uploadedAt || 'Unknown',
-        availableQualities: ['720p', '480p', '360p', 'highest'],
+        title: (info as any).title,
+        thumbnail: (info as any).thumbnail || '',
+        duration: formatDuration((info as any).duration),
+        views: (info as any).view_count?.toLocaleString() || '0',
+        channel: (info as any).uploader || (info as any).channel || 'Unknown',
+        uploadDate: (info as any).upload_date ? new Date((info as any).upload_date).toLocaleDateString() : 'Unknown',
+        availableQualities: ['720p', '480p', '360p', 'best'],
         availableFormats: ['mp4', 'webm', 'mp3', 'm4a'],
       };
 
@@ -54,7 +65,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // YouTube video download endpoint using play-dl
+  // YouTube video download endpoint using youtube-dl-exec
   app.post("/api/download", async (req, res) => {
     try {
       const result = downloadRequestSchema.safeParse(req.body);
@@ -75,39 +86,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Invalid YouTube URL" });
       }
 
-      const info = await video_info(url);
+      // Get video info for filename
+      const info = await youtubedl(url, {
+        dumpSingleJson: true,
+        noCheckCertificates: true,
+        noWarnings: true
+      });
       
-      if (!info) {
-        return res.status(400).json({ error: "Video not found or unavailable" });
-      }
-      
-      const title = info.video_details.title?.replace(/[^\w\s]/gi, '') || 'video';
-
-      // Set appropriate headers for download
+      const title = (info as any).title?.replace(/[^\w\s]/gi, '') || 'video';
       const filename = `${title}.${format}`;
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       
-      if (format === 'mp3' || format === 'm4a') {
-        // Audio only download
-        res.setHeader('Content-Type', `audio/${format}`);
-        const audioStream = await stream(url, {
-          quality: 2
-        });
-        
-        audioStream.stream.pipe(res);
+      // Set headers
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', format === 'mp3' || format === 'm4a' ? `audio/${format}` : `video/${format}`);
+      
+      // Configure download options based on format and quality
+      const downloadOptions: any = {
+        noCheckCertificates: true,
+        noWarnings: true,
+        addHeader: [
+          'referer:youtube.com',
+          'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        ]
+      };
+      
+      if (format === 'mp3') {
+        downloadOptions.extractAudio = true;
+        downloadOptions.audioFormat = 'mp3';
+        downloadOptions.audioQuality = '192K';
+      } else if (format === 'm4a') {
+        downloadOptions.extractAudio = true;
+        downloadOptions.audioFormat = 'm4a';
+        downloadOptions.audioQuality = '192K';
       } else {
         // Video download
-        res.setHeader('Content-Type', `video/${format}`);
-        const videoStream = await stream(url, {
-          quality: quality === '720p' ? 1 : quality === '480p' ? 2 : 3
-        });
-        
-        videoStream.stream.pipe(res);
+        if (quality === '720p') {
+          downloadOptions.format = 'best[height<=720]';
+        } else if (quality === '480p') {
+          downloadOptions.format = 'best[height<=480]';
+        } else if (quality === '360p') {
+          downloadOptions.format = 'best[height<=360]';
+        } else {
+          downloadOptions.format = 'best';
+        }
       }
+      
+      // Stream the download directly to response
+      const process = youtubedl.exec(url, {
+        ...downloadOptions,
+        output: '-'
+      });
+      
+      process.stdout?.pipe(res);
+      
+      process.on('error', (error) => {
+        console.error('Download error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to download video" });
+        }
+      });
+      
+      process.on('close', (code) => {
+        if (code !== 0 && !res.headersSent) {
+          res.status(500).json({ error: "Download failed" });
+        }
+      });
 
     } catch (error: any) {
       console.error('Download error:', error);
-      res.status(500).json({ error: "Failed to download video. Please try again." });
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to download video. Please try again." });
+      }
     }
   });
 
