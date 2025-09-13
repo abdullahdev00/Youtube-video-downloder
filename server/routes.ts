@@ -220,7 +220,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       try {
         // Validate and sanitize inputs to prevent injection
-        const validQualities = ['best', '720p', '480p', '360p', '240p', '144p'];
+        const validQualities = ['best', '1080p', '720p', '480p', '360p', '240p', '144p'];
         const validFormats = ['mp4', 'webm', 'mp3', 'm4a'];
         
         if (!validQualities.includes(quality)) {
