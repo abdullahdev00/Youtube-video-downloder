@@ -1,0 +1,37 @@
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+Getting video info using yt-dlp with bot detection bypass...
+yt-dlp error: Error: Process exited with code 1: Traceback (most recent call last):
+  File "/home/runner/workspace/server/youtube_downloader.py", line 2, in <module>
+    import yt_dlp
+ModuleNotFoundError: No module named 'yt_dlp'
+
+    at ChildProcess.<anonymous> (/home/runner/workspace/server/routes.ts:67:22)
+    at ChildProcess.emit (node:events:524:28)
+    at maybeClose (node:internal/child_process:1104:16)
+    at Socket.<anonymous> (node:internal/child_process:456:11)
+    at Socket.emit (node:events:524:28)
+    at Pipe.<anonymous> (node:net:343:12)
+yt-dlp failed, trying OEmbed fallback: Error: Process exited with code 1: Traceback (most recent call last):
+  File "/home/runner/workspace/server/youtube_downloader.py", line 2, in <module>
+    import yt_dlp
+ModuleNotFoundError: No module named 'yt_dlp'
+
+    at ChildProcess.<anonymous> (/home/runner/workspace/server/routes.ts:67:22)
+    at ChildProcess.emit (node:events:524:28)
+    at maybeClose (node:internal/child_process:1104:16)
+    at Socket.<anonymous> (node:internal/child_process:456:11)
+    at Socket.emit (node:events:524:28)
+    at Pipe.<anonymous> (node:net:343:12)
+Successfully got video info via OEmbed fallback
+4:51:40 AM [express] POST /api/video-info 200 in 95ms :: {"title":"Best Mandi Front of Masjid Al Har…
+Real download requested: mp4 in 1080p quality
+Real download failed: Error: Process exited with code 1: Traceback (most recent call last):
+  File "/home/runner/workspace/server/youtube_downloader.py", line 2, in <module>
+    import yt_dlp
+ModuleNotFoundError: No module named 'yt_dlp'
+
+    at ChildProcess.<anonymous> (/home/runner/workspace/server/routes.ts:257:24)
+    at ChildProcess.emit (node:events:524:28)
+    at maybeClose (node:internal/child_process:1104:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:304:5)
+4:53:22 AM [express] POST /api/download 200 in 43ms :: {"success":false,"message":"Download failed: …
