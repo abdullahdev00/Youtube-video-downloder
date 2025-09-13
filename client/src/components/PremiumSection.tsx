@@ -94,7 +94,7 @@ export function PremiumSection() {
               className={`relative hover-elevate transition-all duration-300 ${
                 plan.popular 
                   ? "border-primary shadow-lg scale-105" 
-                  : "border-border/50"
+                  : "border/50"
               }`}
               data-testid={`card-plan-${plan.name.toLowerCase()}`}
             >
@@ -142,7 +142,7 @@ export function PremiumSection() {
 
                 {/* Limitations (for free plan) */}
                 {plan.limitations.length > 0 && (
-                  <div className="space-y-3 pt-3 border-t border-border/50">
+                  <div className="space-y-3 pt-3 border-t border/50">
                     <h4 className="text-sm font-medium text-muted-foreground">Limitations:</h4>
                     {plan.limitations.map((limitation, limitIndex) => (
                       <div key={limitIndex} className="flex items-start gap-3">

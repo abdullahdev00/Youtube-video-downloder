@@ -1,0 +1,582 @@
+# Complete Replit YouTube Downloader Bot Detection Fix - Comprehensive Agent Prompt
+
+## 🎯 Project Context & Current Issues
+
+You are working with a YouTube video downloader application running on **Replit** that is facing critical bot detection issues. The application is built with:
+
+- **Backend**: Node.js/Express with TypeScript
+- **Frontend**: React/Vite with Tailwind CSS
+- **Current Tool**: yt-dlp for video extraction
+- **Platform**: Replit (cloud-based development environment)
+- **Port**: 5000 (Express server)
+
+## 🚨 Current Error Analysis
+
+The logs show these specific issues:
+
+### 1. PostCSS Warning (Non-Critical)
+```
+A PostCSS plugin did not pass the `from` option to `postcss.parse`
+```
+
+### 2. YouTube Bot Detection (CRITICAL)
+```
+ERROR: [youtube] Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies for the authentication
+```
+
+### 3. Download Failures
+- Video info fetching works via OEmbed fallback
+- Actual downloads fail due to bot detection
+- All download attempts result in authentication errors
+
+## 🔧 Complete Solution Implementation
+
+### Phase 1: Immediate Replit-Specific Fixes
+
+#### Fix 1: Update yt-dlp Installation (Replit Compatible)
+```bash
+# In Replit Shell, run these commands:
+pip install --upgrade yt-dlp
+npm install playwright tough-cookie user-agents
+
+# Verify installation
+yt-dlp --version
+```
+
+#### Fix 2: Create Replit-Optimized Bot Bypass
+Create/update `server/youtube-extractor.ts`:
+
+```typescript
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+import UserAgent from 'user-agents';
+
+const execAsync = promisify(exec);
+
+interface VideoInfo {
+  title: string;
+  thumbnail: string;
+  duration: number;
+  formats: Array<{
+    quality: string;
+    format: string;
+    filesize?: string;
+    url?: string;
+  }>;
+}
+
+class YouTubeExtractor {
+  private userAgents: string[] = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+  ];
+
+  private getRandomUserAgent(): string {
+    return this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
+  }
+
+  private async delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async extractVideoInfo(url: string): Promise<VideoInfo> {
+    // Add random delay to avoid rate limiting
+    await this.delay(Math.random() * 2000 + 1000);
+
+    const userAgent = this.getRandomUserAgent();
+    
+    // Multiple extraction strategies
+    const strategies = [
+      this.extractWithAndroidClient.bind(this),
+      this.extractWithIOSClient.bind(this),
+      this.extractWithWebClient.bind(this),
+      this.extractWithEmbedMethod.bind(this),
+      this.extractWithOEmbed.bind(this)
+    ];
+
+    let lastError: Error | null = null;
+
+    for (const strategy of strategies) {
+      try {
+        console.log(`Trying extraction strategy: ${strategy.name}`);
+        const result = await strategy(url, userAgent);
+        if (result) return result;
+      } catch (error) {
+        console.error(`Strategy ${strategy.name} failed:`, error.message);
+        lastError = error as Error;
+        await this.delay(1000); // Wait before next strategy
+      }
+    }
+
+    throw lastError || new Error('All extraction strategies failed');
+  }
+
+  private async extractWithAndroidClient(url: string, userAgent: string): Promise<VideoInfo> {
+    const command = `yt-dlp --dump-json --no-warnings --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" "${url}"`;
+    
+    try {
+      const { stdout } = await execAsync(command, { 
+        timeout: 30000,
+        env: { ...process.env, PYTHONPATH: '/opt/virtualenvs/python3/lib/python3.10/site-packages' }
+      });
+      
+      const data = JSON.parse(stdout);
+      return this.formatVideoInfo(data);
+    } catch (error) {
+      throw new Error(`Android client extraction failed: ${error.message}`);
+    }
+  }
+
+  private async extractWithIOSClient(url: string, userAgent: string): Promise<VideoInfo> {
+    const command = `yt-dlp --dump-json --no-warnings --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" "${url}"`;
+    
+    try {
+      const { stdout } = await execAsync(command, { timeout: 30000 });
+      const data = JSON.parse(stdout);
+      return this.formatVideoInfo(data);
+    } catch (error) {
+      throw new Error(`iOS client extraction failed: ${error.message}`);
+    }
+  }
+
+  private async extractWithWebClient(url: string, userAgent: string): Promise<VideoInfo> {
+    const command = `yt-dlp --dump-json --no-warnings --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" "${url}"`;
+    
+    try {
+      const { stdout } = await execAsync(command, { timeout: 30000 });
+      const data = JSON.parse(stdout);
+      return this.formatVideoInfo(data);
+    } catch (error) {
+      throw new Error(`Web client extraction failed: ${error.message}`);
+    }
+  }
+
+  private async extractWithEmbedMethod(url: string, userAgent: string): Promise<VideoInfo> {
+    const videoId = this.extractVideoId(url);
+    if (!videoId) throw new Error('Invalid YouTube URL');
+
+    const embedUrl = `https://www.youtube.com/embed/${videoId}`;
+    const command = `yt-dlp --dump-json --no-warnings --user-agent "${userAgent}" "${embedUrl}"`;
+    
+    try {
+      const { stdout } = await execAsync(command, { timeout: 30000 });
+      const data = JSON.parse(stdout);
+      return this.formatVideoInfo(data);
+    } catch (error) {
+      throw new Error(`Embed extraction failed: ${error.message}`);
+    }
+  }
+
+  private async extractWithOEmbed(url: string): Promise<VideoInfo> {
+    const videoId = this.extractVideoId(url);
+    if (!videoId) throw new Error('Invalid YouTube URL');
+
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    
+    try {
+      const response = await fetch(oembedUrl);
+      if (!response.ok) throw new Error('OEmbed request failed');
+      
+      const data = await response.json();
+      return {
+        title: data.title || 'Unknown Title',
+        thumbnail: data.thumbnail_url || '',
+        duration: 0, // OEmbed doesn't provide duration
+        formats: [] // OEmbed doesn't provide format info
+      };
+    } catch (error) {
+      throw new Error(`OEmbed extraction failed: ${error.message}`);
+    }
+  }
+
+  private extractVideoId(url: string): string | null {
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
+      /^([a-zA-Z0-9_-]{11})$/
+    ];
+
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match && match[1]) return match[1];
+    }
+
+    return null;
+  }
+
+  private formatVideoInfo(data: any): VideoInfo {
+    return {
+      title: data.title || 'Unknown Title',
+      thumbnail: data.thumbnail || data.thumbnails?.[0]?.url || '',
+      duration: data.duration || 0,
+      formats: (data.formats || [])
+        .filter((f: any) => f.vcodec !== 'none' && f.acodec !== 'none')
+        .map((f: any) => ({
+          quality: f.height ? `${f.height}p` : f.quality || 'Unknown',
+          format: f.ext || 'mp4',
+          filesize: f.filesize ? this.formatFileSize(f.filesize) : undefined,
+          url: f.url
+        }))
+        .slice(0, 10) // Limit to 10 formats
+    };
+  }
+
+  private formatFileSize(bytes: number): string {
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    if (bytes === 0) return '0 Bytes';
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+  }
+
+  async downloadVideo(url: string, quality: string = '720p', format: string = 'mp4'): Promise<Buffer> {
+    const userAgent = this.getRandomUserAgent();
+    await this.delay(Math.random() * 2000 + 1000);
+
+    const outputPath = `/tmp/video_${Date.now()}.${format}`;
+    
+    const strategies = [
+      () => this.downloadWithAndroidClient(url, quality, format, userAgent, outputPath),
+      () => this.downloadWithIOSClient(url, quality, format, userAgent, outputPath),
+      () => this.downloadWithWebClient(url, quality, format, userAgent, outputPath)
+    ];
+
+    let lastError: Error | null = null;
+
+    for (const strategy of strategies) {
+      try {
+        await strategy();
+        
+        if (fs.existsSync(outputPath)) {
+          const buffer = fs.readFileSync(outputPath);
+          fs.unlinkSync(outputPath); // Cleanup
+          return buffer;
+        }
+      } catch (error) {
+        lastError = error as Error;
+        console.error(`Download strategy failed:`, error.message);
+        await this.delay(2000);
+      }
+    }
+
+    throw lastError || new Error('All download strategies failed');
+  }
+
+  private async downloadWithAndroidClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
+    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
+    const command = `yt-dlp --extractor-args "youtube:player_client=android" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputPath}" "${url}"`;
+    
+    await execAsync(command, { timeout: 120000 });
+  }
+
+  private async downloadWithIOSClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
+    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
+    const command = `yt-dlp --extractor-args "youtube:player_client=ios" --user-agent "${userAgent}" -f "${qualitySelector}" -o "${outputPath}" "${url}"`;
+    
+    await execAsync(command, { timeout: 120000 });
+  }
+
+  private async downloadWithWebClient(url: string, quality: string, format: string, userAgent: string, outputPath: string): Promise<void> {
+    const qualitySelector = quality === 'best' ? 'best' : `best[height<=${quality.replace('p', '')}]`;
+    const command = `yt-dlp --extractor-args "youtube:player_client=web" --user-agent "${userAgent}" --add-header "Accept-Language:en-US,en;q=0.9" -f "${qualitySelector}" -o "${outputPath}" "${url}"`;
+    
+    await execAsync(command, { timeout: 120000 });
+  }
+}
+
+export default new YouTubeExtractor();
+```
+
+#### Fix 3: Update Routes with New Extractor
+Update `server/routes.ts`:
+
+```typescript
+import express from 'express';
+import YouTubeExtractor from './youtube-extractor';
+
+const router = express.Router();
+
+// Video info endpoint
+router.post('/api/video-info', async (req, res) => {
+  try {
+    const { url } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    console.log('Getting video info for:', url);
+    const videoInfo = await YouTubeExtractor.extractVideoInfo(url);
+    
+    res.json({
+      success: true,
+      ...videoInfo
+    });
+  } catch (error) {
+    console.error('Video info error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch video information',
+      message: error.message
+    });
+  }
+});
+
+// Download endpoint
+router.post('/api/download', async (req, res) => {
+  try {
+    const { url, quality = '720p', format = 'mp4' } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    console.log(`Download requested: ${format} in ${quality} quality`);
+    
+    const buffer = await YouTubeExtractor.downloadVideo(url, quality, format);
+    
+    res.setHeader('Content-Type', `video/${format}`);
+    res.setHeader('Content-Disposition', `attachment; filename="video.${format}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Download error:', error);
+    res.json({ 
+      success: false,
+      message: 'Download failed',
+      error: error.message
+    });
+  }
+});
+
+export default router;
+```
+
+### Phase 2: PostCSS Warning Fix (Replit)
+
+#### Fix PostCSS Configuration
+Create `postcss.config.js` in root directory:
+
+```javascript
+module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+  parser: require('postcss-comment'),
+  map: false
+}
+```
+
+Update `package.json` dependencies:
+```json
+{
+  "devDependencies": {
+    "postcss": "^8.4.31",
+    "postcss-comment": "^2.0.0",
+    "autoprefixer": "^10.4.16",
+    "tailwindcss": "^3.3.5"
+  }
+}
+```
+
+### Phase 3: Replit Environment Optimization
+
+#### Create `.replit` Configuration
+```toml
+run = "npm run dev"
+entrypoint = "server/index.ts"
+
+[packager]
+language = "nodejs"
+
+[packager.features]
+enabledForHosting = false
+packageSearch = true
+guessImports = true
+
+[languages.javascript]
+pattern = "**/{*.js,*.jsx,*.ts,*.tsx}"
+syntax = "javascript"
+
+[languages.javascript.languageServer]
+start = "typescript-language-server --stdio"
+
+[deployment]
+run = ["sh", "-c", "npm run build && npm start"]
+deploymentTarget = "cloudrun"
+
+[env]
+NODE_ENV = "development"
+PORT = "5000"
+PYTHONPATH = "/opt/virtualenvs/python3/lib/python3.10/site-packages"
+```
+
+#### Update `nix` Configuration
+Create/update `replit.nix`:
+```nix
+{ pkgs }: {
+  deps = [
+    pkgs.nodejs-18_x
+    pkgs.python310Full
+    pkgs.python310Packages.pip
+    pkgs.ffmpeg
+    pkgs.youtube-dl
+  ];
+  
+  env = {
+    PYTHONPATH = "${pkgs.python310Packages.pip}/lib/python3.10/site-packages";
+    PATH = "${pkgs.python310Packages.pip}/bin:${pkgs.ffmpeg}/bin:$PATH";
+  };
+}
+```
+
+### Phase 4: Error Handling & Logging
+
+#### Enhanced Error Handler
+Create `server/error-handler.ts`:
+
+```typescript
+export class YouTubeDownloadError extends Error {
+  constructor(message: string, public code: string, public originalError?: Error) {
+    super(message);
+    this.name = 'YouTubeDownloadError';
+  }
+}
+
+export const handleYouTubeError = (error: any): YouTubeDownloadError => {
+  const message = error.message || 'Unknown error';
+  
+  if (message.includes('Sign in to confirm you\'re not a bot')) {
+    return new YouTubeDownloadError(
+      'YouTube bot detection triggered. Trying alternative methods...',
+      'BOT_DETECTION',
+      error
+    );
+  }
+  
+  if (message.includes('Video unavailable')) {
+    return new YouTubeDownloadError(
+      'This video is not available for download',
+      'VIDEO_UNAVAILABLE',
+      error
+    );
+  }
+  
+  if (message.includes('Private video')) {
+    return new YouTubeDownloadError(
+      'Cannot download private videos',
+      'PRIVATE_VIDEO',
+      error
+    );
+  }
+  
+  return new YouTubeDownloadError(
+    'Failed to process video',
+    'GENERIC_ERROR',
+    error
+  );
+};
+```
+
+### Phase 5: Testing & Validation
+
+#### Create Test Script
+Create `test-downloader.js`:
+
+```javascript
+const axios = require('axios');
+
+const testUrls = [
+  'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Rick Roll (should work)
+  'https://youtu.be/dQw4w9WgXcQ', // Short URL format
+  'https://www.youtube.com/watch?v=jNQXAC9IVRw' // Another test video
+];
+
+async function testVideoInfo(url) {
+  try {
+    console.log(`Testing video info for: ${url}`);
+    const response = await axios.post('http://localhost:5000/api/video-info', { url });
+    console.log('✅ Success:', response.data.title);
+    return true;
+  } catch (error) {
+    console.log('❌ Failed:', error.response?.data?.message || error.message);
+    return false;
+  }
+}
+
+async function runTests() {
+  console.log('🧪 Testing YouTube Downloader...\n');
+  
+  let passed = 0;
+  for (const url of testUrls) {
+    const success = await testVideoInfo(url);
+    if (success) passed++;
+    console.log('---');
+  }
+  
+  console.log(`\n📊 Results: ${passed}/${testUrls.length} tests passed`);
+}
+
+runTests();
+```
+
+Run test with: `node test-downloader.js`
+
+### Phase 6: Deployment Checklist for Replit
+
+#### Environment Variables
+Set these in Replit's Secrets tab:
+```
+NODE_ENV=production
+PORT=5000
+MAX_CONCURRENT_DOWNLOADS=3
+REQUEST_TIMEOUT=120000
+ENABLE_LOGGING=true
+```
+
+#### Package.json Scripts
+Update your `package.json`:
+```json
+{
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon server/index.ts",
+    "client": "vite",
+    "build": "tsc && vite build",
+    "start": "node dist/server/index.js",
+    "test": "node test-downloader.js"
+  }
+}
+```
+
+## 🎯 Expected Results
+
+After implementing these fixes:
+
+1. ✅ **PostCSS Warning**: Should disappear completely
+2. ✅ **Bot Detection**: Multiple bypass strategies will work
+3. ✅ **Video Info**: Should extract successfully using fallback methods
+4. ✅ **Downloads**: Should work for most public YouTube videos
+5. ✅ **Error Handling**: Clear error messages for users
+6. ✅ **Performance**: Faster extraction with multiple strategies
+
+## 🚀 Implementation Order
+
+1. **First**: Update yt-dlp and install new dependencies
+2. **Second**: Implement the YouTubeExtractor class
+3. **Third**: Update your routes to use the new extractor
+4. **Fourth**: Fix PostCSS configuration
+5. **Fifth**: Test with the provided test script
+6. **Sixth**: Deploy and monitor
+
+## 📝 Monitoring & Maintenance
+
+- Check logs regularly for new bot detection patterns
+- Update yt-dlp monthly: `pip install --upgrade yt-dlp`
+- Monitor success rates and adjust strategies as needed
+- Keep user agents updated with latest browser versions
+
+This comprehensive solution addresses all current issues and provides multiple fallback strategies specifically optimized for the Replit environment.

@@ -181,7 +181,7 @@ export function FAQSection() {
                     <AccordionItem 
                       key={questionIndex} 
                       value={`${categoryIndex}-${questionIndex}`}
-                      className="border border-border/50 rounded-lg px-4 hover-elevate transition-all duration-200"
+                      className="border border/50 rounded-lg px-4 hover-elevate transition-all duration-200"
                     >
                       <AccordionTrigger className="text-left hover:no-underline py-4">
                         <span className="text-sm font-medium text-foreground">
@@ -203,7 +203,7 @@ export function FAQSection() {
 
         {/* Support Contact */}
         <div className="mt-16 text-center">
-          <div className="bg-muted/30 rounded-lg p-8 border border-border/50">
+          <div className="bg-muted/30 rounded-lg p-8 border border/50">
             <h3 className="text-xl font-semibold text-foreground mb-4">
               Still have questions?
             </h3>

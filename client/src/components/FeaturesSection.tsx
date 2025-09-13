@@ -65,7 +65,7 @@ export function FeaturesSection() {
             return (
               <Card 
                 key={index} 
-                className="hover-elevate transition-all duration-300 border-border/50"
+                className="hover-elevate transition-all duration-300 border/50"
                 data-testid={`card-feature-${index}`}
               >
                 <CardContent className="p-6 text-center">

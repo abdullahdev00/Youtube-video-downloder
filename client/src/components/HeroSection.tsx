@@ -231,7 +231,7 @@ export function HeroSection() {
         <div className="max-w-2xl mx-auto mb-12">
           <div className="relative group">
             <div className="absolute inset-0 bg-gradient-to-r from-primary to-primary/80 rounded-lg blur opacity-75 group-hover:opacity-100 transition duration-200" />
-            <div className="relative bg-background rounded-lg p-2 border border-border/50">
+            <div className="relative bg-background rounded-lg p-2 border border/50">
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">
                   <Input

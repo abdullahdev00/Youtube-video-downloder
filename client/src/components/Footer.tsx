@@ -27,7 +27,7 @@ export function Footer() {
   };
 
   return (
-    <footer className="bg-card border-t border-border/50">
+    <footer className="bg-card border-t border/50">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         {/* Main Footer Content */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
@@ -107,7 +107,7 @@ export function Footer() {
         </div>
 
         {/* Trust Indicators */}
-        <div className="flex flex-wrap justify-center items-center gap-6 py-6 border-y border-border/50">
+        <div className="flex flex-wrap justify-center items-center gap-6 py-6 border-y border/50">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Shield className="h-4 w-4 text-chart-2" />
             <span>SSL Secured</span>

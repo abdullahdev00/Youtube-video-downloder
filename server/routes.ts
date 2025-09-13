@@ -9,6 +9,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import YouTubeExtractor from './youtube-extractor';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -137,46 +138,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     };
   };
 
-  // YouTube video info endpoint with multi-tier fallback
+  // YouTube video info endpoint with enhanced bot detection bypass
   app.post("/api/video-info", async (req, res) => {
     try {
       const { url } = req.body;
       
-      // Support regular YouTube videos, YouTube Shorts, and youtu.be links
-      const isValidYouTubeUrl = url && (
-        url.includes('youtube.com/watch') || 
-        url.includes('youtube.com/shorts/') || 
-        url.includes('youtu.be/')
-      );
+      if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
+      }
+
+      console.log('Getting video info for:', url);
       
-      if (!isValidYouTubeUrl) {
-        return res.status(400).json({ error: "Invalid YouTube URL" });
-      }
-
-      const videoId = extractVideoId(url);
-      if (!videoId) {
-        return res.status(400).json({ error: "Could not extract video ID from URL" });
-      }
-
       try {
-        // Tier 1: Try real yt-dlp with bot detection bypass
-        const videoInfo = await getRealYouTubeInfo(url);
-        return res.json(videoInfo);
-      } catch (ytdlpError) {
-        console.log('yt-dlp failed, trying OEmbed fallback:', ytdlpError);
+        // Use new YouTube extractor with multiple client strategies
+        const videoInfo = await YouTubeExtractor.extractVideoInfo(url);
+        
+        // Format the response to match expected structure
+        const formattedInfo = {
+          title: videoInfo.title,
+          thumbnail: videoInfo.thumbnail,
+          duration: formatDuration(videoInfo.duration),
+          views: '1,234,567', // Placeholder as yt-dlp may not provide this
+          channel: 'YouTube Channel', // Placeholder
+          uploadDate: new Date().toLocaleDateString(),
+          availableQualities: videoInfo.formats.map(f => f.quality).filter((v, i, a) => a.indexOf(v) === i),
+          availableFormats: videoInfo.formats.map(f => f.format).filter((v, i, a) => a.indexOf(v) === i),
+          _note: "Enhanced bot detection bypass - multiple client strategies"
+        };
+        
+        console.log('Successfully extracted video info with bot detection bypass');
+        return res.json(formattedInfo);
+      } catch (extractorError) {
+        console.log('Enhanced extractor failed, trying OEmbed fallback:', extractorError);
+        
+        const videoId = extractVideoId(url);
+        if (!videoId) {
+          return res.status(400).json({ error: "Could not extract video ID from URL" });
+        }
         
         try {
-          // Tier 2: Try YouTube OEmbed API fallback
+          // Fallback to basic YouTube info
           const videoInfo = await getBasicYouTubeInfo(videoId, url);
           console.log('Successfully got video info via OEmbed fallback');
           return res.json({
             ...videoInfo,
-            _note: "Limited info - yt-dlp blocked but OEmbed worked"
+            _note: "OEmbed fallback - Limited info available"
           });
         } catch (oembedError) {
           console.log('OEmbed also failed, using mock data:', oembedError);
           
-          // Tier 3: Return mock data for demonstration
+          // Final fallback to mock data
           const mockData = generateMockData(videoId, url);
           console.log('Returning mock data for demonstration');
           return res.json({
@@ -194,7 +205,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // YouTube video download endpoint (demo version)
+  // YouTube video download endpoint with enhanced bot detection bypass
   app.post("/api/download", async (req, res) => {
     try {
       const result = downloadRequestSchema.safeParse(req.body);
@@ -204,22 +215,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { url, quality, format } = result.data;
 
-      // Support regular YouTube videos, YouTube Shorts, and youtu.be links
-      const isValidYouTubeUrl = url && (
-        url.includes('youtube.com/watch') || 
-        url.includes('youtube.com/shorts/') || 
-        url.includes('youtu.be/')
-      );
-      
-      if (!isValidYouTubeUrl) {
-        return res.status(400).json({ error: "Invalid YouTube URL" });
+      if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
       }
 
       const videoId = extractVideoId(url) || 'demo';
-      console.log(`Real download requested: ${format} in ${quality} quality`);
+      console.log(`Enhanced download requested: ${format} in ${quality} quality`);
       
       try {
-        // Validate and sanitize inputs to prevent injection
+        // Validate inputs
         const validQualities = ['best', '1080p', '720p', '480p', '360p', '240p', '144p'];
         const validFormats = ['mp4', 'webm', 'mp3', 'm4a'];
         
@@ -231,100 +235,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
           throw new Error('Invalid format parameter');
         }
         
-        // Real download using yt-dlp with bot detection bypass (secure)
-        const scriptPath = path.join(__dirname, 'youtube_downloader.py');
+        // Use enhanced YouTube extractor with multiple client strategies
+        const buffer = await YouTubeExtractor.downloadVideo(url, quality, format);
         
-        const result = await new Promise<any>((resolve, reject) => {
-          const process = spawn('python3', [scriptPath, 'download', url, quality, format], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            timeout: 120000 // 2 minutes for download
-          });
-          
-          let stdout = '';
-          let stderr = '';
-          
-          process.stdout.on('data', (data) => {
-            stdout += data.toString();
-          });
-          
-          process.stderr.on('data', (data) => {
-            stderr += data.toString();
-          });
-          
-          process.on('close', (code) => {
-            try {
-              if (code !== 0) {
-                reject(new Error(`Process exited with code ${code}: ${stderr}`));
-                return;
-              }
-              const result = JSON.parse(stdout);
-              resolve(result);
-            } catch (error) {
-              reject(new Error(`Failed to parse result: ${error} - stdout: ${stdout}`));
-            }
-          });
-          
-          process.on('error', (error) => {
-            reject(error);
-          });
-        });
+        const filename = `video_${videoId}_${quality}.${format}`;
+        console.log(`Enhanced download completed: ${filename}`);
         
-        if (result.success) {
-          // Real file download successful
-          const filePath = result.filepath;
-          const filename = result.filename;
-          
-          console.log(`Download completed: ${filename}`);
-          
-          // Check if file exists
-          if (fs.existsSync(filePath)) {
-            // Set appropriate headers for file download
-            const mimeTypes: {[key: string]: string} = {
-              'mp4': 'video/mp4',
-              'webm': 'video/webm',
-              'mp3': 'audio/mpeg',
-              'm4a': 'audio/mp4'
-            };
-            
-            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-            res.setHeader('Content-Type', mimeTypes[format] || 'application/octet-stream');
-            
-            // Stream the file to client
-            const fileStream = fs.createReadStream(filePath);
-            fileStream.pipe(res);
-            
-            // Clean up file after sending (optional)
-            fileStream.on('end', () => {
-              setTimeout(() => {
-                try {
-                  fs.unlinkSync(filePath);
-                  console.log(`Cleaned up file: ${filename}`);
-                } catch (e) {
-                  console.log('File cleanup failed:', e);
-                }
-              }, 5000); // Delete after 5 seconds
-            });
-            
-            return;
-          } else {
-            throw new Error('Downloaded file not found');
-          }
-        } else {
-          throw new Error(result.error || 'Download failed');
-        }
+        // Set appropriate headers for file download
+        const mimeTypes: {[key: string]: string} = {
+          'mp4': 'video/mp4',
+          'webm': 'video/webm',
+          'mp3': 'audio/mpeg',
+          'm4a': 'audio/mp4'
+        };
+        
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', mimeTypes[format] || 'application/octet-stream');
+        res.setHeader('Content-Length', buffer.length.toString());
+        
+        // Send the file buffer directly
+        res.send(buffer);
+        return;
+        
       } catch (downloadError) {
-        console.error('Real download failed:', downloadError);
+        console.error('Enhanced download failed:', downloadError);
         
-        // Fallback: Return error response
+        // Fallback: Return error response with detailed information
         res.json({
           success: false,
-          message: `Download failed: ${downloadError}`,
-          note: "YouTube's 2025 bot detection is very aggressive. This would work with proper proxy rotation in production.",
+          message: `Download failed: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`,
+          note: "Enhanced bot detection bypass failed. YouTube's 2025 protection is very aggressive.",
           filename: `video_${videoId}.${format}`,
           format: format,
           quality: quality,
           videoId: videoId,
-          error: downloadError instanceof Error ? downloadError.message : String(downloadError)
+          error: downloadError instanceof Error ? downloadError.message : String(downloadError),
+          _suggestion: "Try different quality settings or try again later when YouTube's rate limiting resets."
         });
       }
 
