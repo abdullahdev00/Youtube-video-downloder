@@ -4,6 +4,12 @@ import { storage } from "./storage";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { downloadRequestSchema, videoInfoSchema } from "@shared/schema";
+import { exec } from "child_process";
+import { promisify } from "util";
+import path from "path";
+import fs from "fs";
+
+const execAsync = promisify(exec);
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Extract video ID from various YouTube URL formats
@@ -30,30 +36,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Simple YouTube thumbnail extraction (bypasses most restrictions)
+  // Real YouTube video info extraction using yt-dlp with bot detection bypass
+  const getRealYouTubeInfo = async (url: string) => {
+    try {
+      console.log('Getting video info using yt-dlp with bot detection bypass...');
+      const scriptPath = path.join(__dirname, 'youtube_downloader.py');
+      const { stdout, stderr } = await execAsync(`python3 "${scriptPath}" info "${url}"`);
+      
+      if (stderr && !stderr.includes('WARNING')) {
+        console.error('yt-dlp stderr:', stderr);
+      }
+      
+      const result = JSON.parse(stdout);
+      
+      if (result.success) {
+        console.log('Successfully got video info via yt-dlp');
+        return {
+          title: result.title,
+          thumbnail: result.thumbnail,
+          duration: formatDuration(result.duration),
+          views: result.views?.toLocaleString() || '0',
+          channel: result.channel,
+          uploadDate: result.uploadDate,
+          availableQualities: result.availableQualities,
+          availableFormats: result.availableFormats,
+        };
+      } else {
+        throw new Error(result.error || 'Failed to get video info');
+      }
+    } catch (error) {
+      console.error('yt-dlp error:', error);
+      throw error;
+    }
+  };
+
+  // Fallback to OEmbed for basic info
   const getBasicYouTubeInfo = async (videoId: string, url: string) => {
     try {
-      // Try to get basic info using YouTube's OEmbed API (often works)
       const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+      const response = await axios.get(oembedUrl, { timeout: 5000 });
+      const data = response.data;
       
-      try {
-        const response = await axios.get(oembedUrl, { timeout: 5000 });
-        const data = response.data;
-        
-        return {
-          title: data.title || `YouTube Video ${videoId}`,
-          thumbnail: data.thumbnail_url || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-          duration: url.includes('/shorts/') ? '0:30' : '3:45',
-          views: '1,234,567',
-          channel: data.author_name || 'YouTube Channel',
-          uploadDate: new Date().toLocaleDateString(),
-          availableQualities: ['720p', '480p', '360p', 'best'],
-          availableFormats: ['mp4', 'webm', 'mp3', 'm4a'],
-        };
-      } catch (oembedError) {
-        // OEmbed failed, return mock data
-        throw new Error('OEmbed failed');
-      }
+      return {
+        title: data.title || `YouTube Video ${videoId}`,
+        thumbnail: data.thumbnail_url || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+        duration: url.includes('/shorts/') ? '0:30' : '3:45',
+        views: '1,234,567',
+        channel: data.author_name || 'YouTube Channel',
+        uploadDate: new Date().toLocaleDateString(),
+        availableQualities: ['720p', '480p', '360p', 'best'],
+        availableFormats: ['mp4', 'webm', 'mp3', 'm4a'],
+      };
     } catch (error) {
       throw new Error('Failed to get video info');
     }
@@ -96,20 +129,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       try {
-        // Tier 1: Try YouTube OEmbed API
-        const videoInfo = await getBasicYouTubeInfo(videoId, url);
-        console.log('Successfully got video info via OEmbed API');
+        // Tier 1: Try real yt-dlp with bot detection bypass
+        const videoInfo = await getRealYouTubeInfo(url);
         return res.json(videoInfo);
-      } catch (apiError) {
-        console.log('OEmbed API failed, using mock data:', apiError);
+      } catch (ytdlpError) {
+        console.log('yt-dlp failed, trying OEmbed fallback:', ytdlpError);
         
-        // Tier 2: Return mock data for demonstration
-        const mockData = generateMockData(videoId, url);
-        console.log('Returning mock data for demonstration');
-        return res.json({
-          ...mockData,
-          _note: "Demo data - YouTube is blocking API access. This shows the UI functionality."
-        });
+        try {
+          // Tier 2: Try YouTube OEmbed API fallback
+          const videoInfo = await getBasicYouTubeInfo(videoId, url);
+          console.log('Successfully got video info via OEmbed fallback');
+          return res.json({
+            ...videoInfo,
+            _note: "Limited info - yt-dlp blocked but OEmbed worked"
+          });
+        } catch (oembedError) {
+          console.log('OEmbed also failed, using mock data:', oembedError);
+          
+          // Tier 3: Return mock data for demonstration
+          const mockData = generateMockData(videoId, url);
+          console.log('Returning mock data for demonstration');
+          return res.json({
+            ...mockData,
+            _note: "Demo data - All YouTube APIs blocked. This shows UI functionality."
+          });
+        }
       }
 
     } catch (error: any) {
@@ -142,21 +186,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const videoId = extractVideoId(url) || 'demo';
-      const filename = `video_${videoId}.${format}`;
+      console.log(`Real download requested: ${format} in ${quality} quality`);
       
-      // For demo purposes, return a message instead of actual download
-      // In production, this would use a working download service
-      console.log(`Download requested: ${filename} in ${quality} quality`);
-      
-      res.json({
-        success: true,
-        message: `Download initiated for ${filename}`,
-        note: "This is a demo version. In production, you would integrate with a working YouTube download service.",
-        filename: filename,
-        format: format,
-        quality: quality,
-        videoId: videoId
-      });
+      try {
+        // Real download using yt-dlp with bot detection bypass
+        const scriptPath = path.join(__dirname, 'youtube_downloader.py');
+        const { stdout, stderr } = await execAsync(`python3 "${scriptPath}" download "${url}" "${quality}" "${format}"`);
+        
+        if (stderr && !stderr.includes('WARNING')) {
+          console.error('Download stderr:', stderr);
+        }
+        
+        const result = JSON.parse(stdout);
+        
+        if (result.success) {
+          // Real file download successful
+          const filePath = result.filepath;
+          const filename = result.filename;
+          
+          console.log(`Download completed: ${filename}`);
+          
+          // Check if file exists
+          if (fs.existsSync(filePath)) {
+            // Set appropriate headers for file download
+            const mimeTypes: {[key: string]: string} = {
+              'mp4': 'video/mp4',
+              'webm': 'video/webm',
+              'mp3': 'audio/mpeg',
+              'm4a': 'audio/mp4'
+            };
+            
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.setHeader('Content-Type', mimeTypes[format] || 'application/octet-stream');
+            
+            // Stream the file to client
+            const fileStream = fs.createReadStream(filePath);
+            fileStream.pipe(res);
+            
+            // Clean up file after sending (optional)
+            fileStream.on('end', () => {
+              setTimeout(() => {
+                try {
+                  fs.unlinkSync(filePath);
+                  console.log(`Cleaned up file: ${filename}`);
+                } catch (e) {
+                  console.log('File cleanup failed:', e);
+                }
+              }, 5000); // Delete after 5 seconds
+            });
+            
+            return;
+          } else {
+            throw new Error('Downloaded file not found');
+          }
+        } else {
+          throw new Error(result.error || 'Download failed');
+        }
+      } catch (downloadError) {
+        console.error('Real download failed:', downloadError);
+        
+        // Fallback: Return error response
+        res.json({
+          success: false,
+          message: `Download failed: ${downloadError}`,
+          note: "YouTube's 2025 bot detection is very aggressive. This would work with proper proxy rotation in production.",
+          filename: `video_${videoId}.${format}`,
+          format: format,
+          quality: quality,
+          videoId: videoId,
+          error: downloadError instanceof Error ? downloadError.message : String(downloadError)
+        });
+      }
 
     } catch (error: any) {
       console.error('Download error:', error);
