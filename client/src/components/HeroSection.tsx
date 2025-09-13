@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Download, ClipboardType, X } from "lucide-react";
+import { Download, Clipboard, X, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { VideoPreviewCard } from "./VideoPreviewCard";
+import { VideoInfo } from "@shared/schema";
 import backgroundShapes from "@assets/generated_images/Floating_geometric_background_shapes_2b8086c4.png";
 
 export function HeroSection() {
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
   const { toast } = useToast();
 
   const handlePaste = async () => {
@@ -19,6 +23,8 @@ export function HeroSection() {
           title: "URL pasted successfully",
           description: "YouTube URL detected from clipboard",
         });
+        // Auto-fetch video info
+        fetchVideoInfo(text);
       } else {
         toast({
           title: "No YouTube URL found",
@@ -35,8 +41,9 @@ export function HeroSection() {
     }
   };
 
-  const handleDownload = () => {
-    if (!url) {
+  const fetchVideoInfo = async (urlToFetch?: string) => {
+    const targetUrl = urlToFetch || url;
+    if (!targetUrl) {
       toast({
         title: "URL required",
         description: "Please enter a YouTube URL first",
@@ -46,19 +53,96 @@ export function HeroSection() {
     }
 
     setIsLoading(true);
-    // Simulate processing
-    setTimeout(() => {
-      setIsLoading(false);
-      console.log("Download initiated for:", url);
-      toast({
-        title: "Processing started",
-        description: "Your video is being prepared for download",
+    setVideoInfo(null);
+
+    try {
+      const response = await fetch("/api/video-info", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: targetUrl }),
       });
-    }, 2000);
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to fetch video info");
+      }
+
+      const info = await response.json();
+      setVideoInfo(info);
+      toast({
+        title: "Video found!",
+        description: "Video information loaded successfully",
+      });
+    } catch (error) {
+      console.error("Error fetching video info:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to fetch video information",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownload = (quality: string, format: string) => {
+    if (!url) {
+      toast({
+        title: "No video selected",
+        description: "Please fetch video information first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsDownloading(true);
+    
+    // Use POST request for download
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/api/download';
+    form.style.display = 'none';
+    
+    const urlInput = document.createElement('input');
+    urlInput.name = 'url';
+    urlInput.value = url;
+    form.appendChild(urlInput);
+    
+    const qualityInput = document.createElement('input');
+    qualityInput.name = 'quality';
+    qualityInput.value = quality;
+    form.appendChild(qualityInput);
+    
+    const formatInput = document.createElement('input');
+    formatInput.name = 'format';
+    formatInput.value = format;
+    form.appendChild(formatInput);
+    
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+
+    toast({
+      title: "Download started",
+      description: `Downloading ${format.toUpperCase()} in ${quality} quality`,
+    });
+
+    // Reset downloading state after a delay
+    setTimeout(() => {
+      setIsDownloading(false);
+    }, 3000);
   };
 
   const clearUrl = () => {
     setUrl("");
+    setVideoInfo(null);
+  };
+
+  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUrl(e.target.value);
+    setVideoInfo(null);
   };
 
   return (
@@ -103,9 +187,9 @@ export function HeroSection() {
                 <div className="relative flex-1">
                   <Input
                     type="url"
-                    placeholder="ClipboardType YouTube URL here... (e.g., https://youtube.com/watch?v=...)"
+                    placeholder="Paste YouTube URL here... (e.g., https://youtube.com/watch?v=...)"
                     value={url}
-                    onChange={(e) => setUrl(e.target.value)}
+                    onChange={handleUrlChange}
                     className="h-12 pr-20 text-base border-0 focus-visible:ring-1 focus-visible:ring-primary bg-muted/50"
                     data-testid="input-youtube-url"
                   />
@@ -128,26 +212,26 @@ export function HeroSection() {
                       onClick={handlePaste}
                       data-testid="button-paste-url"
                     >
-                      <ClipboardType className="h-4 w-4" />
+                      <Clipboard className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
                 <Button
                   size="lg"
-                  onClick={handleDownload}
-                  disabled={isLoading}
+                  onClick={() => fetchVideoInfo()}
+                  disabled={isLoading || !url}
                   className="h-12 px-8 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
-                  data-testid="button-download"
+                  data-testid="button-get-info"
                 >
                   {isLoading ? (
                     <div className="flex items-center gap-2">
                       <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Processing...
+                      Loading...
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
-                      <Download className="h-5 w-5" />
-                      Download
+                      <Search className="h-5 w-5" />
+                      Get Video
                     </div>
                   )}
                 </Button>
@@ -155,6 +239,21 @@ export function HeroSection() {
             </div>
           </div>
         </div>
+
+        {/* Video Preview Card */}
+        {videoInfo && (
+          <div className="mb-12 animate-in slide-in-from-bottom-4 duration-500">
+            <VideoPreviewCard
+              thumbnail={videoInfo.thumbnail}
+              title={videoInfo.title}
+              channel={videoInfo.channel}
+              duration={videoInfo.duration}
+              views={videoInfo.views}
+              uploadDate={videoInfo.uploadDate}
+              onDownload={handleDownload}
+            />
+          </div>
+        )}
 
         {/* Trust Indicators */}
         <div className="flex flex-wrap justify-center items-center gap-8 text-sm text-muted-foreground">

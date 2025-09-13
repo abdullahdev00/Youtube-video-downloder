@@ -70,7 +70,7 @@ const plans = [
 export function PremiumSection() {
   const handlePlanSelect = (planName: string) => {
     console.log(`Selected plan: ${planName}`);
-    // TODO: Integrate with Stripe for payment processing
+    // TODO: Implement payment processing
   };
 
   return (
@@ -191,7 +191,7 @@ export function PremiumSection() {
               <div className="h-8 w-8 bg-chart-2/20 rounded-full flex items-center justify-center">
                 <Check className="h-4 w-4 text-chart-2" />
               </div>
-              <span>Secure payment with Stripe</span>
+              <span>Secure payment processing</span>
             </div>
           </div>
           

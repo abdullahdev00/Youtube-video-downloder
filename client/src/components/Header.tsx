@@ -20,12 +20,12 @@ export function Header() {
   ];
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border/40">
+    <header className="fixed top-0 left-0 right-0 z-50 bg-white/10 dark:bg-black/10 backdrop-blur-xl border-b border-white/20 dark:border-white/10 shadow-lg">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 md:h-20">
           {/* Logo */}
           <div className="flex items-center gap-3">
-            <img src={logoUrl} alt="YTDownloader Pro" className="h-8 w-8" />
+            <img src={logoUrl} alt="YTDownloader Pro" className="h-12 w-12" style={{background: 'transparent'}} />
             <span className="text-xl font-bold text-foreground">YTDownloader Pro</span>
           </div>
 
