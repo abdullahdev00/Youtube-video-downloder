@@ -44,12 +44,12 @@ export function VideoPreviewCard({
   const { toast } = useToast();
 
   const qualityOptions = [
-    { value: "2160p", label: "2160p (4K)", size: "~2.5GB" },
-    { value: "1440p", label: "1440p (2K)", size: "~1.8GB" },
-    { value: "1080p", label: "1080p (HD)", size: "~800MB" },
-    { value: "720p", label: "720p", size: "~400MB" },
-    { value: "480p", label: "480p", size: "~200MB" },
-    { value: "360p", label: "360p", size: "~100MB" },
+    { value: "2160p", label: "2160p (4K)" },
+    { value: "1440p", label: "1440p (2K)" },
+    { value: "1080p", label: "1080p (HD)" },
+    { value: "720p", label: "720p" },
+    { value: "480p", label: "480p" },
+    { value: "360p", label: "360p" },
   ];
 
   const formatOptions = [
@@ -244,9 +244,6 @@ export function VideoPreviewCard({
     }
   };
 
-  const getSelectedQualityInfo = () => {
-    return qualityOptions.find(q => q.value === selectedQuality);
-  };
 
   return (
     <Card className="max-w-md mx-auto overflow-hidden hover-elevate transition-all duration-300">
@@ -304,12 +301,7 @@ export function VideoPreviewCard({
                 <SelectContent>
                   {qualityOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
-                      <div className="flex justify-between items-center w-full">
-                        <span>{option.label}</span>
-                        <span className="text-xs text-muted-foreground ml-2">
-                          {option.size}
-                        </span>
-                      </div>
+                      <span>{option.label}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -336,9 +328,6 @@ export function VideoPreviewCard({
           </div>
 
           {/* File Size Info */}
-          <div className="text-xs text-muted-foreground">
-            Estimated size: <span className="font-medium">{getSelectedQualityInfo()?.size}</span>
-          </div>
         </div>
 
         {/* Enhanced Real-time Download Progress */}
